@@ -1,0 +1,28 @@
+sources:
+  langgraph:
+    tech_name: LangGraph
+    aliases:
+      - langgraph
+      - LangGraph
+    source_url: https://docs.langchain.com/oss/python/langgraph/overview
+
+  redis:
+    tech_name: Redis
+    aliases:
+      - redis
+      - Redis
+    source_url: https://redis.io/docs/latest/
+
+  rabbitmq:
+    tech_name: RabbitMQ
+    aliases:
+      - rabbitmq
+      - RabbitMQ
+    source_url: https://www.rabbitmq.com/docs
+
+  prometheus:
+    tech_name: Prometheus
+    aliases:
+      - prometheus
+      - Prometheus
+    source_url: https://prometheus.io/docs/introduction/overview/

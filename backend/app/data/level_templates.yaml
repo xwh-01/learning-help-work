@@ -1,0 +1,28 @@
+templates:
+  observe:
+    name: 体感关
+    goal: Compare the baseline and target examples, then notice the core difference.
+    task_style: Observation and explanation. No coding required.
+    constraints:
+      - Test exactly one core point from the current knowledge point.
+      - Do not introduce advanced_later knowledge.
+      - Keep the task small and concrete.
+
+  hands_on:
+    name: 动手关
+    goal: Make a tiny change or write a small snippet using the target technology.
+    task_style: Short hands-on exercise.
+    constraints:
+      - Must fit within 10 to 15 minutes.
+      - Test exactly one core point from the current knowledge point.
+      - Do not introduce advanced_later knowledge.
+      - Keep setup and code short.
+
+  summary:
+    name: 总结关
+    goal: Summarize when and why this knowledge point matters.
+    task_style: Short reflective answer.
+    constraints:
+      - Test exactly one core point from the current knowledge point.
+      - Do not introduce advanced_later knowledge.
+      - Ask for a concise explanation, not a broad essay.

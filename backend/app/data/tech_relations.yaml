@@ -1,0 +1,64 @@
+relations:
+  langgraph:
+    tech_name: LangGraph
+    aliases:
+      - langgraph
+      - LangGraph
+    baseline:
+      - Plain Python control flow
+    similar:
+      - LangChain AgentExecutor
+      - Temporal
+      - Prefect
+    skip_now:
+      - AutoGen
+      - CrewAI
+      - custom multi-agent framework
+
+  redis:
+    tech_name: Redis
+    aliases:
+      - redis
+      - Redis
+    baseline:
+      - In-process cache
+    similar:
+      - Memcached
+      - MySQL query cache pattern
+      - KeyDB
+    skip_now:
+      - Elasticsearch
+      - Kafka
+      - etcd
+
+  rabbitmq:
+    tech_name: RabbitMQ
+    aliases:
+      - rabbitmq
+      - RabbitMQ
+    baseline:
+      - Direct synchronous HTTP call
+    similar:
+      - Kafka
+      - Redis Streams
+      - Amazon SQS
+    skip_now:
+      - Celery internals
+      - NATS JetStream
+      - Pulsar
+
+  prometheus:
+    tech_name: Prometheus
+    aliases:
+      - prometheus
+      - Prometheus
+    baseline:
+      - Application logs and manual checks
+    similar:
+      - StatsD
+      - OpenTelemetry Metrics
+      - Grafana Mimir
+    skip_now:
+      - ELK log analytics
+      - Jaeger tracing
+      - Datadog
