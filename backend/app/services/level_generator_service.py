@@ -39,18 +39,31 @@ class LevelGeneratorService:
         tech_name: str,
         knowledge_points: list[KnowledgePoint],
     ) -> list[LearningLevel]:
-        all_existing: list[LearningLevel] = []
+        existing_by_point: dict[int, set[str]] = {}
         for point in knowledge_points:
-            all_existing.extend(self.repository.list_levels_by_knowledge_point(point.id))
-        if all_existing:
-            return all_existing
+            existing = self.repository.list_levels_by_knowledge_point(point.id)
+            existing_by_point[point.id] = {level.level_type for level in existing}
+
+        all_types = set(self.LEVEL_TYPES)
+        all_complete = all(
+            existing_by_point.get(point.id, set()) >= all_types
+            for point in knowledge_points
+        )
+        if all_complete:
+            all_entities: list[LearningLevel] = []
+            for point in knowledge_points:
+                all_entities.extend(self.repository.list_levels_by_knowledge_point(point.id))
+            return all_entities
 
         levels: list[LearningLevel] = []
         errors: list[dict] = []
         for point in knowledge_points:
             if point.category != "must_learn":
                 continue
+            existing_types = existing_by_point.get(point.id, set())
             for sort_order, level_type in enumerate(self.LEVEL_TYPES, start=1):
+                if level_type in existing_types:
+                    continue
                 try:
                     level = await self.generate_for_point(
                         tech_name=tech_name,

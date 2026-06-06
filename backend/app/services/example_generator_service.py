@@ -31,16 +31,25 @@ class ExampleGeneratorService:
         knowledge_points: list[KnowledgePoint],
         user_level: str | None = None,
     ) -> list[LearningExample]:
-        all_existing: list[LearningExample] = []
+        existing_by_point: dict[int, bool] = {}
         for point in knowledge_points:
-            all_existing.extend(self.repository.list_examples_by_knowledge_point(point.id))
+            existing = self.repository.list_examples_by_knowledge_point(point.id)
+            existing_by_point[point.id] = bool(existing)
+
+        all_existing = all(existing_by_point.values())
         if all_existing:
-            return all_existing
+            all_entities: list[LearningExample] = []
+            for point in knowledge_points:
+                all_entities.extend(self.repository.list_examples_by_knowledge_point(point.id))
+            return all_entities
 
         examples: list[LearningExample] = []
         errors: list[dict] = []
         for point in knowledge_points:
             if point.category != "must_learn":
+                continue
+            if existing_by_point.get(point.id):
+                examples.extend(self.repository.list_examples_by_knowledge_point(point.id))
                 continue
             try:
                 example = await self.generate_for_point(

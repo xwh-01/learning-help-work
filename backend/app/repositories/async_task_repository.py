@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
@@ -43,6 +45,18 @@ class AsyncTaskRepository:
             .limit(1)
         )
         return self.db.execute(stmt).scalar_one_or_none()
+
+    def list_stale_running(self, older_than_minutes: int = 30) -> list[AsyncTask]:
+        cutoff = datetime.utcnow() - timedelta(minutes=older_than_minutes)
+        stmt = (
+            select(AsyncTask)
+            .where(
+                AsyncTask.status == "running",
+                AsyncTask.updated_at < cutoff,
+            )
+            .order_by(desc(AsyncTask.updated_at))
+        )
+        return list(self.db.execute(stmt).scalars().all())
 
     def update(
         self,

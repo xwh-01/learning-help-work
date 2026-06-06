@@ -6,6 +6,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.config import get_settings
+from app.llm.json_parser import LLMJsonParseError, parse_llm_json_with_repair
 
 
 logger = logging.getLogger(__name__)
@@ -92,7 +93,7 @@ class LLMClient:
         temperature: float = 0.2,
         max_tokens: int | None = None,
     ) -> SchemaT:
-        last_error: ValidationError | None = None
+        last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             schema_instruction = {
                 "role": "system",
@@ -113,14 +114,13 @@ class LLMClient:
                 require_json=True,
             )
 
-            normalized = self._normalize_json_content(content)
             try:
-                return schema.model_validate_json(normalized)
-            except (ValidationError, ValueError) as exc:
+                return parse_llm_json_with_repair(content, schema)
+            except (LLMJsonParseError, ValidationError, ValueError) as exc:
                 last_error = exc
-                preview = normalized[:800] if len(normalized) > 800 else normalized
+                preview = content[:800] if len(content) > 800 else content
                 logger.warning(
-                    "LLM JSON failed Pydantic validation for %s on attempt %s/%s. "
+                    "LLM JSON parsing failed for %s on attempt %s/%s. "
                     "Raw response (first 800 chars): %s | Error: %s",
                     schema.__name__,
                     attempt + 1,
@@ -130,9 +130,10 @@ class LLMClient:
                 )
 
         logger.error("LLM JSON failed validation after retries for %s.", schema.__name__)
+        preview = content[:500] if 'content' in dir() else "(no content)"
         raise LLMResponseValidationError(
             f"LLM response did not match {schema.__name__} after {self.max_retries + 1} attempts. "
-            f"Last raw response: {normalized[:500]}"
+            f"Last raw response: {preview}"
         ) from last_error
 
     def _chat_completions_url(self) -> str:
@@ -149,9 +150,3 @@ class LLMClient:
         if not isinstance(content, str) or not content.strip():
             raise ValueError("LLM response content is empty.")
         return content.strip()
-
-    def _normalize_json_content(self, content: str) -> str:
-        stripped = content.strip()
-        if stripped.startswith("```"):
-            stripped = stripped.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        return stripped
