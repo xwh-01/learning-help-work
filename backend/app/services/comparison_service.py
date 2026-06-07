@@ -104,7 +104,9 @@ class ComparisonService:
                     "You may only compare the technologies in selected_for_comparison. Do not add unrelated tools.\n"
                     "Use skipped_candidates only to explain what is intentionally not expanded now.\n"
                     "Write baseline_solution, comparison_task, comparison_table values, when_to_use, when_not_to_use, "
-                    "and skipped_candidates explanations in Chinese. Keep technology names and API names in English.\n\n"
+                    "and skipped_candidates explanations in Chinese. Keep technology names and API names in English.\n"
+                    "Keep comparison_table concise: at most 4 rows, each cell under 60 Chinese characters.\n"
+                    "Keep when_to_use and when_not_to_use to 3 concise items each.\n\n"
                     f"target_tech: {tech_name}\n"
                     f"ordinary_baseline: {baseline}\n"
                     f"selected_for_comparison: {selected}\n"
@@ -121,7 +123,7 @@ class ComparisonService:
             messages,
             ComparisonResultSchema,
             temperature=0.1,
-            max_tokens=2200,
+            max_tokens=4000,
         )
 
     def _enforce_boundaries(

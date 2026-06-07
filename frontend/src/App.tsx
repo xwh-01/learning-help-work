@@ -1,10 +1,11 @@
-import { type ReactNode, useMemo, useState } from "react";
-import Editor from "@monaco-editor/react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   createLearningSession,
+  ensureExample,
+  ensureLevel,
   generateLearningCard,
   getComparisons,
   getExamples,
@@ -26,7 +27,7 @@ type View = "home" | "progress" | "lesson" | "card";
 type LessonSection = "compare" | "practice" | "reflect";
 
 type SubmissionState = {
-  kind: "practice" | "reflection";
+  kind: "compare" | "practice" | "reflection";
   feedback: FeedbackResult;
   message: string;
   nextLevelId: number | null;
@@ -245,9 +246,15 @@ function LessonPage({
   const queryClient = useQueryClient();
   const [selectedPointId, setSelectedPointId] = useState<number | null>(null);
   const [selectedSection, setSelectedSection] = useState<LessonSection>("compare");
+  const [compareAnswer, setCompareAnswer] = useState("");
   const [practiceAnswer, setPracticeAnswer] = useState("");
   const [reflectionAnswer, setReflectionAnswer] = useState("");
   const [submission, setSubmission] = useState<SubmissionState | null>(null);
+  const [showCompareReference, setShowCompareReference] = useState(false);
+  const [showPracticeReference, setShowPracticeReference] = useState(false);
+  const [showReflectionReference, setShowReflectionReference] = useState(false);
+  const [requestedExampleFor, setRequestedExampleFor] = useState<number | null>(null);
+  const [requestedLevelFor, setRequestedLevelFor] = useState<string | null>(null);
 
   const sessionQuery = useQuery({ queryKey: ["session", sessionId], queryFn: () => getLearningSession(sessionId) });
   const pointsQuery = useQuery({ queryKey: ["knowledge-points", sessionId], queryFn: () => getKnowledgePoints(sessionId) });
@@ -262,6 +269,7 @@ function LessonPage({
       fallbackPoints[0]
     );
   }, [fallbackPoints, selectedPointId, sessionQuery.data?.current_knowledge_point_id]);
+  const currentPointIndex = currentPoint ? fallbackPoints.findIndex((point) => point.id === currentPoint.id) : -1;
 
   const levelQueries = useQueries({
     queries: fallbackPoints.map((point) => ({
@@ -278,6 +286,7 @@ function LessonPage({
   }, [fallbackPoints, levelQueries]);
 
   const currentLevels = currentPoint ? levelsByPoint.get(currentPoint.id) ?? [] : [];
+  const currentLevelsQuery = currentPointIndex >= 0 ? levelQueries[currentPointIndex] : undefined;
   const compareLevel = findLevel(currentLevels, "observe");
   const practiceLevel = findLevel(currentLevels, "hands_on");
   const reflectionLevel = findLevel(currentLevels, "summary");
@@ -291,8 +300,43 @@ function LessonPage({
   const example = examplesQuery.data?.[0] ?? null;
   const comparison = comparisonsQuery.data?.[0];
 
+  const ensureExampleMutation = useMutation({
+    mutationFn: (knowledgePointId: number) => ensureExample(knowledgePointId),
+    onSuccess: (_example, knowledgePointId) => {
+      queryClient.invalidateQueries({ queryKey: ["examples", knowledgePointId] });
+    },
+  });
+
+  const ensureLevelMutation = useMutation({
+    mutationFn: ({ knowledgePointId, levelType }: { knowledgePointId: number; levelType: "observe" | "hands_on" | "summary" }) =>
+      ensureLevel(knowledgePointId, levelType),
+    onSuccess: (_level, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["levels", variables.knowledgePointId] });
+    },
+  });
+
+  useEffect(() => {
+    if (selectedSection !== "compare" || !currentPoint || examplesQuery.isLoading || example) return;
+    if (requestedExampleFor === currentPoint.id) return;
+    if (ensureExampleMutation.isPending || ensureExampleMutation.error) return;
+    setRequestedExampleFor(currentPoint.id);
+    ensureExampleMutation.mutate(currentPoint.id);
+  }, [currentPoint, example, examplesQuery.isLoading, requestedExampleFor, selectedSection, ensureExampleMutation]);
+
+  useEffect(() => {
+    if (!currentPoint || currentLevelsQuery?.isLoading) return;
+    const levelType = sectionToLevelType[selectedSection] as "observe" | "hands_on" | "summary";
+    const existing = findLevel(currentLevels, levelType);
+    if (existing) return;
+    const requestKey = `${currentPoint.id}:${levelType}`;
+    if (requestedLevelFor === requestKey) return;
+    if (ensureLevelMutation.isPending || ensureLevelMutation.error) return;
+    setRequestedLevelFor(requestKey);
+    ensureLevelMutation.mutate({ knowledgePointId: currentPoint.id, levelType });
+  }, [currentLevels, currentLevelsQuery?.isLoading, currentPoint, ensureLevelMutation, requestedLevelFor, selectedSection]);
+
   const submitMutation = useMutation({
-    mutationFn: async ({ level, answer, kind }: { level: LearningLevel; answer: string; kind: "practice" | "reflection" }) => {
+    mutationFn: async ({ level, answer, kind }: { level: LearningLevel; answer: string; kind: "compare" | "practice" | "reflection" }) => {
       const response = await submitAnswer(level.id, answer);
       const feedback = await getFeedback(response.answer_id);
       const nextLevel = response.next_level_id ? await getLevel(response.next_level_id) : null;
@@ -338,6 +382,9 @@ function LessonPage({
                   setSelectedPointId(point.id);
                   setSelectedSection("compare");
                   setSubmission(null);
+                  setShowCompareReference(false);
+                  setShowPracticeReference(false);
+                  setShowReflectionReference(false);
                 }}
               >
                 {index + 1}. {point.title}
@@ -351,6 +398,9 @@ function LessonPage({
                       setSelectedPointId(point.id);
                       setSelectedSection(section);
                       setSubmission(null);
+                      setShowCompareReference(false);
+                      setShowPracticeReference(false);
+                      setShowReflectionReference(false);
                     }}
                   >
                     {sectionLabels[section]}
@@ -370,6 +420,8 @@ function LessonPage({
         </LessonSectionBlock>
 
         <LessonSectionBlock title="Baseline">
+          {ensureExampleMutation.isPending && selectedSection === "compare" ? <InlineLoading label="Preparing this lesson..." /> : null}
+          {ensureExampleMutation.error && selectedSection === "compare" ? <ErrorText error={ensureExampleMutation.error} /> : null}
           <CodeBlock value={example?.baseline_example} />
           <p className="mt-3 text-sm text-muted-foreground">How this is typically handled without the target technology.</p>
         </LessonSectionBlock>
@@ -381,34 +433,61 @@ function LessonPage({
 
         <LessonSectionBlock title="What to notice">
           <List items={example?.observe_questions ?? []} />
-          {compareLevel?.task ? <MarkdownBlock>{compareLevel.task}</MarkdownBlock> : null}
+          {ensureLevelMutation.isPending && selectedSection === "compare" ? <InlineLoading label="Preparing this lesson..." /> : null}
+          {ensureLevelMutation.error && selectedSection === "compare" ? <ErrorText error={ensureLevelMutation.error} /> : null}
+          <QuestionBlock level={compareLevel} fallback="This lesson has not been prepared yet. Select Compare to prepare it." />
+          <AnswerEditor value={compareAnswer} onChange={setCompareAnswer} />
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              disabled={!compareLevel || !compareAnswer.trim() || submitMutation.isPending}
+              onClick={() => compareLevel && submitMutation.mutate({ level: compareLevel, answer: compareAnswer, kind: "compare" })}
+            >
+              {submitMutation.isPending ? "Reviewing..." : "Submit for AI review"}
+            </Button>
+            <Button variant="outline" disabled={!compareLevel?.reference_answer} onClick={() => setShowCompareReference((value) => !value)}>
+              {showCompareReference ? "Hide reference answer" : "Show reference answer"}
+            </Button>
+          </div>
+          {showCompareReference && compareLevel?.reference_answer ? <ReferenceAnswer value={compareLevel.reference_answer} /> : null}
         </LessonSectionBlock>
 
         <LessonSectionBlock title="Practice">
-          <MarkdownBlock>{practiceLevel?.task ?? activeLevel?.task ?? "暂无练习题。"}</MarkdownBlock>
-          <AnswerEditor value={practiceAnswer} onChange={setPracticeAnswer} height="240px" />
-          <div className="mt-3">
+          {ensureLevelMutation.isPending && selectedSection === "practice" ? <InlineLoading label="Generating this exercise..." /> : null}
+          {ensureLevelMutation.error && selectedSection === "practice" ? <ErrorText error={ensureLevelMutation.error} /> : null}
+          <QuestionBlock level={practiceLevel ?? activeLevel} fallback="This lesson has not been prepared yet. Select Practice to prepare it." />
+          <AnswerEditor value={practiceAnswer} onChange={setPracticeAnswer} />
+          <div className="mt-3 flex flex-wrap gap-2">
             <Button
               disabled={!practiceLevel || !practiceAnswer.trim() || submitMutation.isPending}
               onClick={() => practiceLevel && submitMutation.mutate({ level: practiceLevel, answer: practiceAnswer, kind: "practice" })}
             >
-              {submitMutation.isPending ? "Submitting..." : "Submit answer"}
+              {submitMutation.isPending ? "Reviewing..." : "Submit for AI review"}
+            </Button>
+            <Button variant="outline" disabled={!practiceLevel?.reference_answer} onClick={() => setShowPracticeReference((value) => !value)}>
+              {showPracticeReference ? "Hide reference answer" : "Show reference answer"}
             </Button>
           </div>
+          {showPracticeReference && practiceLevel?.reference_answer ? <ReferenceAnswer value={practiceLevel.reference_answer} /> : null}
         </LessonSectionBlock>
 
         <LessonSectionBlock title="Reflection">
-          <MarkdownBlock>{reflectionLevel?.task ?? "请用自己的话总结：普通写法和目标技术写法相比，结构、职责或使用时机发生了什么变化。"}</MarkdownBlock>
-          <AnswerEditor value={reflectionAnswer} onChange={setReflectionAnswer} height="180px" />
-          <div className="mt-3">
+          {ensureLevelMutation.isPending && selectedSection === "reflect" ? <InlineLoading label="Generating this exercise..." /> : null}
+          {ensureLevelMutation.error && selectedSection === "reflect" ? <ErrorText error={ensureLevelMutation.error} /> : null}
+          <QuestionBlock level={reflectionLevel} fallback="This lesson has not been prepared yet. Select Reflect to prepare it." />
+          <AnswerEditor value={reflectionAnswer} onChange={setReflectionAnswer} />
+          <div className="mt-3 flex flex-wrap gap-2">
             <Button
               variant="outline"
               disabled={!reflectionLevel || !reflectionAnswer.trim() || submitMutation.isPending}
               onClick={() => reflectionLevel && submitMutation.mutate({ level: reflectionLevel, answer: reflectionAnswer, kind: "reflection" })}
             >
-              Submit reflection
+              {submitMutation.isPending ? "Reviewing..." : "Submit for AI review"}
+            </Button>
+            <Button variant="outline" disabled={!reflectionLevel?.reference_answer} onClick={() => setShowReflectionReference((value) => !value)}>
+              {showReflectionReference ? "Hide reference answer" : "Show reference answer"}
             </Button>
           </div>
+          {showReflectionReference && reflectionLevel?.reference_answer ? <ReferenceAnswer value={reflectionLevel.reference_answer} /> : null}
         </LessonSectionBlock>
 
         {submitMutation.error ? <ErrorText error={submitMutation.error} /> : null}
@@ -425,6 +504,9 @@ function LessonPage({
         </NoteBlock>
         <NoteBlock title="Acceptance criteria">
           <List items={activeLevel?.acceptance_criteria ?? practiceLevel?.acceptance_criteria ?? []} />
+        </NoteBlock>
+        <NoteBlock title="Rubric">
+          <List items={activeLevel?.rubric ?? practiceLevel?.rubric ?? []} />
         </NoteBlock>
         <NoteBlock title="Common mistakes">
           <List items={activeLevel?.common_mistakes ?? practiceLevel?.common_mistakes ?? []} />
@@ -541,17 +623,51 @@ function DocumentField({ title, value }: { title: string; value: string | string
   );
 }
 
-function AnswerEditor({ value, onChange, height }: { value: string; onChange: (value: string) => void; height: string }) {
+function QuestionBlock({ level, fallback }: { level: LearningLevel | null; fallback: string }) {
+  if (!level) return <p className="text-sm text-muted-foreground">{fallback}</p>;
   return (
-    <div className="mt-4 overflow-hidden rounded-md border border-border bg-white">
-      <Editor
-        height={height}
-        defaultLanguage="markdown"
-        theme="vs-light"
+    <div className="space-y-4">
+      {level.scenario ? (
+        <div>
+          <div className="mb-1 text-sm font-semibold">Scenario</div>
+          <MarkdownBlock>{level.scenario}</MarkdownBlock>
+        </div>
+      ) : null}
+      <div>
+        <div className="mb-1 text-sm font-semibold">Question</div>
+        <MarkdownBlock>{level.question || level.task || fallback}</MarkdownBlock>
+      </div>
+      <div>
+        <div className="mb-1 text-sm font-semibold">Answer requirements</div>
+        <List items={level.answer_requirements?.length ? level.answer_requirements : level.acceptance_criteria} />
+      </div>
+    </div>
+  );
+}
+
+function AnswerEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="mt-4 block space-y-2">
+      <span className="text-sm font-semibold">Your answer</span>
+      <textarea
+        className="min-h-36 w-full resize-y rounded-md border border-border bg-white px-3 py-2 text-sm leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring"
         value={value}
-        onChange={(next) => onChange(next ?? "")}
-        options={{ minimap: { enabled: false }, wordWrap: "on", fontSize: 14, scrollBeyondLastLine: false }}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Explain your reasoning in your own words."
       />
+    </label>
+  );
+}
+
+function InlineLoading({ label }: { label: string }) {
+  return <div className="mb-3 rounded-md border border-border bg-white px-3 py-2 text-sm text-muted-foreground">{label}</div>;
+}
+
+function ReferenceAnswer({ value }: { value: string }) {
+  return (
+    <div className="mt-4 rounded-md border border-border bg-white p-4">
+      <div className="mb-2 text-sm font-semibold">Reference answer</div>
+      <MarkdownBlock>{value}</MarkdownBlock>
     </div>
   );
 }
@@ -565,19 +681,25 @@ function CodeBlock({ value }: { value: string | null | undefined }) {
 }
 
 function FeedbackPanel({ submission }: { submission: SubmissionState }) {
-  const result = submission.feedback.result;
+  const feedback = submission.feedback;
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Feedback: {result === "pass" ? "Pass" : result === "partial" ? "Partial" : "Needs work"}</CardTitle>
+        <CardTitle>AI review</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
-        <p className="text-muted-foreground">{submission.feedback.feedback || submission.message}</p>
-        <div className="grid gap-4 md:grid-cols-3">
-          <DocumentField title="Correct" value={submission.feedback.correct_points} />
-          <DocumentField title="Missing" value={submission.feedback.missing_points} />
-          <DocumentField title="Review" value={submission.feedback.suggested_review_points} />
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="text-2xl font-semibold">{feedback.score}/100</div>
+          <div className="text-sm text-muted-foreground">{feedback.passed ? "Passed" : "Needs improvement"}</div>
         </div>
+        <p className="text-muted-foreground">{feedback.feedback || submission.message}</p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <DocumentField title="Strengths" value={feedback.strengths.length ? feedback.strengths : feedback.correct_points} />
+          <DocumentField title="Missing points" value={feedback.missing_points} />
+          <DocumentField title="Misconception" value={feedback.misconception || "No clear misconception detected."} />
+          <DocumentField title="Next hint" value={feedback.next_hint || "Revise your answer using the missing points."} />
+        </div>
+        <DocumentField title="Improved answer" value={feedback.improved_answer || "No improved answer was returned."} />
       </CardContent>
     </Card>
   );

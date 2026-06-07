@@ -108,10 +108,19 @@ class LevelGeneratorService:
                         "Do not introduce advanced_later knowledge points or unrelated tools. "
                         "Use the supplied template constraints strictly.\n\n"
                         "Language and format requirements:\n"
-                        "- Write title, task, hint, acceptance_criteria, and common_mistakes in Chinese.\n"
+                        "- This is a knowledge Q&A lesson, not a code editor exercise.\n"
+                        "- Do not require the learner to write a complete runnable program.\n"
+                        "- You must output scenario, question, answer_requirements, rubric, reference_answer, hint, and common_mistakes.\n"
+                        "- Also output task as a concise Markdown rendering of scenario + question + answer_requirements for backward compatibility.\n"
+                        "- Write all learner-facing fields in Chinese.\n"
+                        "- You must output reference_answer.\n"
+                        "- reference_answer should be concise answer points, not the only standard answer.\n"
+                        "- Keep scenario, question, and reference_answer concise.\n"
+                        "- Keep hint, reference_answer, and each list item concise.\n"
                         "- Keep technology names, API names, class names, function names, commands, and code keywords in their original English.\n"
-                        "- Format task like a Chinese technical course exercise with: 背景, 任务, 要求, 提交内容, 验收标准.\n"
-                        "- For hands_on tasks, keep the exercise small enough for 10 to 15 minutes.\n\n"
+                        "- If level_type is observe, make it a Compare question: baseline vs target differences and the problem solved by the target technology.\n"
+                        "- If level_type is hands_on, make it a Practice scenario design question: steps/nodes/modules, state/data flow, why this design, and when not to use the target technology. Pseudocode is allowed, but runnable code is not required.\n"
+                        "- If level_type is summary, make it a Reflect question: pain point, baseline solution, when to use, when not to use, and a minimal intuition example.\n\n"
                         f"tech_name: {tech_name}\n"
                         f"knowledge_point_title: {knowledge_point.title}\n"
                         f"knowledge_point_goal: {knowledge_point.goal or ''}\n"
@@ -124,7 +133,7 @@ class LevelGeneratorService:
             ],
             LearningLevelSchema,
             temperature=0.1,
-            max_tokens=2200,
+            max_tokens=4000,
         )
         return self._validate_level(level, knowledge_point, level_type)
 
@@ -150,10 +159,34 @@ class LevelGeneratorService:
             level = level.model_copy(update={"knowledge_point_title": knowledge_point.title})
         if level.type not in self.LEVEL_TYPES:
             raise LevelValidationError(f"Unsupported level type: {level.type}")
+        if not level.acceptance_criteria and level.rubric:
+            level = level.model_copy(update={"acceptance_criteria": level.rubric})
+        if not level.acceptance_criteria and level.answer_requirements:
+            level = level.model_copy(update={"acceptance_criteria": level.answer_requirements})
+        if not level.task.strip():
+            level = level.model_copy(
+                update={
+                    "task": "\n\n".join(
+                        part
+                        for part in [
+                            f"### 场景\n{level.scenario}" if level.scenario else "",
+                            f"### 问题\n{level.question}" if level.question else "",
+                            "### 答题要求\n" + "\n".join(f"- {item}" for item in level.answer_requirements)
+                            if level.answer_requirements
+                            else "",
+                        ]
+                        if part
+                    )
+                }
+            )
         missing = []
-        for field_name in ["title", "task", "hint"]:
+        for field_name in ["title", "scenario", "question", "task", "hint", "reference_answer"]:
             if not getattr(level, field_name).strip():
                 missing.append(field_name)
+        if not level.answer_requirements:
+            missing.append("answer_requirements")
+        if not level.rubric:
+            missing.append("rubric")
         if not level.acceptance_criteria:
             missing.append("acceptance_criteria")
         if not level.common_mistakes:

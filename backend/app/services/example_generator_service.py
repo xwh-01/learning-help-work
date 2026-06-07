@@ -100,6 +100,9 @@ class ExampleGeneratorService:
                         "- Code may remain in its natural programming language syntax.\n"
                         "- If baseline_example or target_example include comments, write comments in Chinese.\n"
                         "- Preserve technology names, API names, class names, function names, commands, and code keywords in English.\n\n"
+                        "Length requirements:\n"
+                        "- Keep baseline_example and target_example short, preferably under 35 lines each.\n"
+                        "- Keep observe_questions to 2 or 3 concise Chinese questions.\n\n"
                         f"tech_name: {tech_name}\n"
                         f"user_level: {user_level or 'unspecified'}\n"
                         f"knowledge_point_title: {knowledge_point.title}\n"
@@ -116,7 +119,7 @@ class ExampleGeneratorService:
             ],
             LearningExampleSchema,
             temperature=0.1,
-            max_tokens=1600,
+            max_tokens=2600,
         )
         return self._validate_example(example, knowledge_point)
 

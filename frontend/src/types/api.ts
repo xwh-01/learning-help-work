@@ -74,10 +74,15 @@ export type LearningLevel = {
   knowledge_point_id: number;
   type: string;
   title: string;
+  scenario: string | null;
+  question: string | null;
+  answer_requirements: string[];
   task: string | null;
   hint: string | null;
+  rubric: string[];
   acceptance_criteria: string[];
   common_mistakes: string[];
+  reference_answer: string | null;
   sort_order: number;
 };
 
@@ -110,9 +115,15 @@ export type FeedbackResult = {
   answer_id: number;
   level_id: number | null;
   result: "pass" | "partial" | "fail";
+  score: number;
+  passed: boolean;
+  strengths: string[];
   correct_points: string[];
   missing_points: string[];
+  misconception: string;
   feedback: string;
+  improved_answer: string;
+  next_hint: string;
   suggested_review_points: string[];
 };
 

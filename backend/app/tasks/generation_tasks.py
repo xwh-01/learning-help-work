@@ -8,9 +8,7 @@ from app.db.session import SessionLocal
 from app.repositories.async_task_repository import AsyncTaskRepository
 from app.repositories.learning_session_repository import LearningSessionRepository
 from app.services.comparison_service import ComparisonService
-from app.services.example_generator_service import ExampleGeneratorService
 from app.services.knowledge_planner_service import KnowledgePlannerService
-from app.services.level_generator_service import LevelGeneratorService
 from app.services.official_docs_service import OfficialDocsService
 from app.tasks.celery_app import celery_app
 
@@ -47,8 +45,6 @@ async def _generate_learning_session(db: Session, *, session_id: int, task_id: s
     material = None
     comparison = None
     knowledge_points: list = []
-    examples: list = []
-    levels: list = []
 
     try:
         session_repository.set_status(session_id, "generating")
@@ -93,45 +89,12 @@ async def _generate_learning_session(db: Session, *, session_id: int, task_id: s
 
     must_learn_points = [point for point in knowledge_points if point.category == "must_learn"]
 
-    _mark_step(task_repository, task_id, 70, "generate_examples")
-    if must_learn_points:
-        try:
-            examples = await ExampleGeneratorService(db).generate(
-                session_id=session_id,
-                tech_name=learning_session.tech_name,
-                material=material,
-                comparison=comparison,
-                knowledge_points=must_learn_points,
-                user_level=learning_session.user_level,
-            )
-        except Exception as exc:
-            logger.exception("generate_examples failed for session_id=%s", session_id)
-            errors.append({"step": "generate_examples", "error": str(exc)})
-
-    _mark_step(task_repository, task_id, 90, "generate_levels")
-    if must_learn_points:
-        try:
-            levels = await LevelGeneratorService(db).generate(
-                session_id=session_id,
-                tech_name=learning_session.tech_name,
-                knowledge_points=must_learn_points,
-            )
-        except Exception as exc:
-            logger.exception("generate_levels failed for session_id=%s", session_id)
-            errors.append({"step": "generate_levels", "error": str(exc)})
-
     first_point_id = must_learn_points[0].id if must_learn_points else None
-    first_level_id = levels[0].id if levels else None
     session_repository.set_current_position(
-        session_id, knowledge_point_id=first_point_id, level_id=first_level_id,
+        session_id, knowledge_point_id=first_point_id, level_id=None,
     )
 
-    if must_learn_points and len(examples) < len(must_learn_points):
-        errors.append({"step": "generate_examples", "error": f"Only {len(examples)}/{len(must_learn_points)} examples generated"})
-    if must_learn_points and len(levels) < len(must_learn_points) * 3:
-        errors.append({"step": "generate_levels", "error": f"Only {len(levels)}/{len(must_learn_points) * 3} levels generated"})
-
-    all_ok = len(errors) == 0 and len(must_learn_points) > 0
+    all_ok = material is not None and comparison is not None and len(must_learn_points) > 0
     final_status = "ready" if all_ok else "partial"
     session_repository.set_status(session_id, final_status)
 
@@ -140,8 +103,9 @@ async def _generate_learning_session(db: Session, *, session_id: int, task_id: s
         "official_material_id": material.id if material else None,
         "comparison_result_id": comparison.id if comparison else None,
         "knowledge_point_count": len(knowledge_points),
-        "example_count": len(examples),
-        "level_count": len(levels),
+        "example_count": 0,
+        "level_count": 0,
+        "on_demand_generation": True,
         "errors": errors if errors else None,
     }
     task_repository.update(

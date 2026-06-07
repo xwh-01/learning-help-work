@@ -46,17 +46,28 @@ class LearningLevelSchema(StrictBaseModel):
     knowledge_point_title: str = Field(validation_alias=AliasChoices("knowledge_point_title", "knowledge_point", "title"))
     type: str
     title: str
+    scenario: str = ""
+    question: str = ""
+    answer_requirements: list[str] = Field(default_factory=list)
     task: str
     hint: str
+    rubric: list[str] = Field(default_factory=list)
     acceptance_criteria: list[str] = Field(default_factory=list)
     common_mistakes: list[str] = Field(default_factory=list)
+    reference_answer: str = ""
 
 
 class FeedbackResultSchema(StrictBaseModel):
     result: str
+    score: int = 0
+    passed: bool = False
+    strengths: list[str] = Field(default_factory=list)
     correct_points: list[str] = Field(default_factory=list)
     missing_points: list[str] = Field(default_factory=list)
+    misconception: str = ""
     feedback: str
+    improved_answer: str = ""
+    next_hint: str = ""
     suggested_review_points: list[str] = Field(default_factory=list)
 
 

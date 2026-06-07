@@ -173,10 +173,15 @@ class LearningLevel(BigIntPrimaryKeyMixin, TimestampMixin, Base):
     )
     level_type: Mapped[str] = mapped_column(String(32), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    scenario: Mapped[str | None] = mapped_column(Text, nullable=True)
+    question: Mapped[str | None] = mapped_column(Text, nullable=True)
+    answer_requirements: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
+    rubric: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
     task: Mapped[str | None] = mapped_column(Text, nullable=True)
     hint: Mapped[str | None] = mapped_column(Text, nullable=True)
     acceptance_criteria: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
     common_mistakes: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
+    reference_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
 
 

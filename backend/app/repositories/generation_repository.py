@@ -124,10 +124,15 @@ class GenerationRepository:
                     knowledge_point_id=point.id,
                     level_type=level.type,
                     title=level.title,
+                    scenario=level.scenario,
+                    question=level.question,
+                    answer_requirements=level.answer_requirements,
+                    rubric=level.rubric,
                     task=level.task,
                     hint=level.hint,
                     acceptance_criteria=level.acceptance_criteria,
                     common_mistakes=level.common_mistakes,
+                    reference_answer=level.reference_answer,
                     sort_order=per_point_count[level.knowledge_point_title],
                 )
             )
@@ -150,10 +155,15 @@ class GenerationRepository:
             knowledge_point_id=knowledge_point_id,
             level_type=level.type,
             title=level.title,
+            scenario=level.scenario,
+            question=level.question,
+            answer_requirements=level.answer_requirements,
+            rubric=level.rubric,
             task=level.task,
             hint=level.hint,
             acceptance_criteria=level.acceptance_criteria,
             common_mistakes=level.common_mistakes,
+            reference_answer=level.reference_answer,
             sort_order=sort_order,
         )
         self.db.add(entity)
@@ -168,6 +178,16 @@ class GenerationRepository:
             .order_by(LearningLevel.sort_order, LearningLevel.id)
         )
         return list(self.db.execute(stmt).scalars().all())
+
+    def get_level_by_knowledge_point_and_type(self, knowledge_point_id: int, level_type: str) -> LearningLevel | None:
+        stmt = (
+            select(LearningLevel)
+            .where(LearningLevel.knowledge_point_id == knowledge_point_id)
+            .where(LearningLevel.level_type == level_type)
+            .order_by(LearningLevel.id)
+            .limit(1)
+        )
+        return self.db.execute(stmt).scalar_one_or_none()
 
     def get_level(self, level_id: int) -> LearningLevel | None:
         stmt = select(LearningLevel).where(LearningLevel.id == level_id)

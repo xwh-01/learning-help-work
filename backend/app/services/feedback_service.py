@@ -31,15 +31,23 @@ class FeedbackService:
                     "role": "user",
                     "content": (
                         "Evaluate the user's answer for this learning level. "
-                        "Only judge against the level task, acceptance criteria, common mistakes, and knowledge point. "
+                        "Only judge against the level question, rubric, acceptance criteria, common mistakes, and knowledge point. "
                         "Return result as exactly one of: pass, partial, fail. "
                         "Do not decide navigation or the next level. "
-                        "Write correct_points, missing_points, feedback, and suggested_review_points in Chinese. "
+                        "Return score from 0 to 100 and passed as true only when score >= 70. "
+                        "Write strengths, missing_points, misconception, improved_answer, next_hint, correct_points, feedback, and suggested_review_points in Chinese. "
+                        "For compare levels, score whether the learner understands baseline vs target differences. "
+                        "For practice levels, score whether the learner can apply the technology to the scenario. "
+                        "For reflect levels, score whether the learner explains pain point, use boundary, and non-use boundary. "
                         "Keep technology names, API names, class names, function names, commands, and code keywords in English.\n\n"
                         f"knowledge_point_title: {knowledge_point.title}\n"
                         f"knowledge_point_goal: {knowledge_point.goal or ''}\n"
                         f"level_type: {level.level_type}\n"
                         f"level_title: {level.title}\n"
+                        f"scenario: {level.scenario or ''}\n"
+                        f"question: {level.question or ''}\n"
+                        f"answer_requirements: {level.answer_requirements or []}\n"
+                        f"rubric: {level.rubric or []}\n"
                         f"level_task: {level.task or ''}\n"
                         f"acceptance_criteria: {level.acceptance_criteria or []}\n"
                         f"common_mistakes: {level.common_mistakes or []}\n\n"
@@ -64,6 +72,12 @@ class FeedbackService:
 
     def _validate_feedback(self, feedback: FeedbackResultSchema) -> FeedbackResultSchema:
         result = feedback.result.strip().lower()
+        score = max(0, min(100, int(feedback.score)))
+        passed = bool(feedback.passed) if feedback.passed is not None else score >= 70
         if result not in self.ALLOWED_RESULTS:
-            raise FeedbackValidationError(f"Unsupported feedback result: {feedback.result}")
-        return feedback.model_copy(update={"result": result})
+            result = "pass" if passed else "partial" if score >= 45 else "fail"
+        if passed and result != "pass":
+            result = "pass"
+        if not passed and result == "pass":
+            result = "partial" if score >= 45 else "fail"
+        return feedback.model_copy(update={"result": result, "score": score, "passed": passed})

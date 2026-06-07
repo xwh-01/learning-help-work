@@ -32,8 +32,14 @@ export const getKnowledgePoints = (sessionId: number) =>
 export const getExamples = (knowledgePointId: number) =>
   apiGet<LearningExample[]>(`/api/knowledge-points/${knowledgePointId}/examples`);
 
+export const ensureExample = (knowledgePointId: number) =>
+  apiPost<LearningExample>(`/api/knowledge-points/${knowledgePointId}/ensure-example`);
+
 export const getLevels = (knowledgePointId: number) =>
   apiGet<LearningLevel[]>(`/api/knowledge-points/${knowledgePointId}/levels`);
+
+export const ensureLevel = (knowledgePointId: number, levelType: "observe" | "hands_on" | "summary") =>
+  apiPost<LearningLevel>(`/api/knowledge-points/${knowledgePointId}/levels/${levelType}/ensure`);
 
 export const getLevel = (levelId: number) => apiGet<LearningLevel>(`/api/levels/${levelId}`);
 
