@@ -1,28 +1,31 @@
 templates:
   observe:
-    name: 体感关
-    goal: Compare the baseline and target examples, then notice the core difference.
-    task_style: Observation and explanation. No coding required.
+    name: Compare
+    goal: 对比普通写法和目标技术写法，观察当前知识点带来的结构差异。
+    task_style: 观察与解释，不要求写代码。
     constraints:
-      - Test exactly one core point from the current knowledge point.
-      - Do not introduce advanced_later knowledge.
-      - Keep the task small and concrete.
+      - 只考察当前知识点的一个核心点。
+      - 不引入 advanced_later 知识点。
+      - 题面必须使用中文技术课程格式：背景、任务、要求、提交内容、验收标准。
+      - 问题要短小具体，聚焦 baseline_example 与 target_example 的差异。
 
   hands_on:
-    name: 动手关
-    goal: Make a tiny change or write a small snippet using the target technology.
-    task_style: Short hands-on exercise.
+    name: Practice
+    goal: 围绕当前知识点写一个很小的代码片段或完成一个小修改。
+    task_style: 短小动手练习。
     constraints:
-      - Must fit within 10 to 15 minutes.
-      - Test exactly one core point from the current knowledge point.
-      - Do not introduce advanced_later knowledge.
-      - Keep setup and code short.
+      - 必须控制在 10 到 15 分钟内完成。
+      - 只考察当前知识点的一个核心点。
+      - 不引入 advanced_later 知识点。
+      - 题面必须使用中文技术课程格式：背景、任务、要求、提交内容、验收标准。
+      - 代码要求要短，setup 要少。
 
   summary:
-    name: 总结关
-    goal: Summarize when and why this knowledge point matters.
-    task_style: Short reflective answer.
+    name: Reflect
+    goal: 总结当前知识点什么时候有用，以及它和普通写法的差异。
+    task_style: 简短反思题。
     constraints:
-      - Test exactly one core point from the current knowledge point.
-      - Do not introduce advanced_later knowledge.
-      - Ask for a concise explanation, not a broad essay.
+      - 只考察当前知识点的一个核心点。
+      - 不引入 advanced_later 知识点。
+      - 题面必须使用中文技术课程格式：背景、任务、要求、提交内容、验收标准。
+      - 要求学习者给出简洁解释，不写宽泛长文。

@@ -95,6 +95,11 @@ class ExampleGeneratorService:
                         "baseline_example must show the ordinary baseline way. "
                         "target_example must show the target technology way. "
                         "official_example should be grounded in the official material when possible.\n\n"
+                        "Language requirements:\n"
+                        "- Write beginner_example explanations and observe_questions in Chinese.\n"
+                        "- Code may remain in its natural programming language syntax.\n"
+                        "- If baseline_example or target_example include comments, write comments in Chinese.\n"
+                        "- Preserve technology names, API names, class names, function names, commands, and code keywords in English.\n\n"
                         f"tech_name: {tech_name}\n"
                         f"user_level: {user_level or 'unspecified'}\n"
                         f"knowledge_point_title: {knowledge_point.title}\n"
@@ -138,7 +143,7 @@ class ExampleGeneratorService:
             example = example.model_copy(
                 update={
                     "observe_questions": [
-                        "What concrete difference do you notice between the baseline example and the target technology example?"
+                        "对比普通写法和目标技术写法，你能观察到哪一个具体差异？"
                     ]
                 }
             )

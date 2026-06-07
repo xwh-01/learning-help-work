@@ -1,27 +1,11 @@
 import { type ReactNode, useMemo, useState } from "react";
 import Editor from "@monaco-editor/react";
 import ReactMarkdown from "react-markdown";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  AlertCircle,
-  BookOpen,
-  CheckCircle2,
-  ChevronRight,
-  Circle,
-  ClipboardCheck,
-  FileText,
-  Layers,
-  Loader2,
-  Play,
-  RotateCw,
-  Send,
-  Target,
-} from "lucide-react";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   createLearningSession,
   generateLearningCard,
-  generatePracticeTask,
   getComparisons,
   getExamples,
   getFeedback,
@@ -31,40 +15,60 @@ import {
   getLearningSessionStatus,
   getLevel,
   getLevels,
-  getPracticeTask,
-  listLearningSessions,
   submitAnswer,
 } from "./api/learning";
-import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Input } from "./components/ui/input";
-import { Textarea } from "./components/ui/textarea";
-import type { FeedbackResult, LearningExample, LearningLevel, PracticeTask } from "./types/api";
+import type { FeedbackResult, LearningCard, LearningLevel } from "./types/api";
 
-type View = "create" | "progress" | "learn" | "practice" | "card";
+type View = "home" | "progress" | "lesson" | "card";
+type LessonSection = "compare" | "practice" | "reflect";
 
-type LastSubmission = {
-  result: "pass" | "partial" | "fail";
+type SubmissionState = {
+  kind: "practice" | "reflection";
+  feedback: FeedbackResult;
   message: string;
   nextLevelId: number | null;
 };
 
 const SESSION_KEY = "techleveler.session_id";
 const savedSessionId = Number(localStorage.getItem(SESSION_KEY) ?? 0) || null;
-const readyStatuses = new Set(["ready", "levels_completed", "completed"]);
+const readyStatuses = new Set(["ready", "partial", "levels_completed", "completed"]);
 
-const generationSteps = [
-  { title: "官方资料", detail: "抓取官方来源并提取正文", start: 0, end: 20 },
-  { title: "技术边界", detail: "生成普通方案 vs 目标技术对比", start: 20, end: 40 },
-  { title: "知识点拆解", detail: "规划 must_learn / advanced_later / skip_now", start: 40, end: 60 },
-  { title: "体感样例", detail: "为每个必学知识点生成短样例", start: 60, end: 80 },
-  { title: "三类关卡", detail: "生成观察、动手、总结关", start: 80, end: 100 },
+const steps = [
+  { key: "fetch_official_material", label: "Reading official material", start: 0, end: 20 },
+  { key: "generate_comparison", label: "Building comparison", start: 20, end: 40 },
+  { key: "generate_knowledge_points", label: "Planning core concepts", start: 40, end: 60 },
+  { key: "generate_examples", label: "Creating examples", start: 60, end: 80 },
+  { key: "generate_levels", label: "Designing exercises", start: 80, end: 100 },
 ];
+
+const messageText: Record<string, string> = {
+  fetch_official_material: "Reading official material",
+  generate_comparison: "Building baseline comparison",
+  generate_knowledge_points: "Planning core concepts",
+  generate_examples: "Creating baseline vs target examples",
+  generate_levels: "Designing small exercises",
+  completed: "Ready",
+  ready: "Ready",
+};
+
+const sectionLabels: Record<LessonSection, string> = {
+  compare: "Compare",
+  practice: "Practice",
+  reflect: "Reflect",
+};
+
+const sectionToLevelType: Record<LessonSection, string> = {
+  compare: "observe",
+  practice: "hands_on",
+  reflect: "summary",
+};
 
 export default function App() {
   const [sessionId, setSessionId] = useState<number | null>(savedSessionId);
-  const [view, setView] = useState<View>(savedSessionId ? "progress" : "create");
+  const [view, setView] = useState<View>(savedSessionId ? "progress" : "home");
 
   const openSession = (nextSessionId: number, nextView: View) => {
     localStorage.setItem(SESSION_KEY, String(nextSessionId));
@@ -72,30 +76,23 @@ export default function App() {
     setView(nextView);
   };
 
-  const resetSession = () => {
+  const reset = () => {
     localStorage.removeItem(SESSION_KEY);
     setSessionId(null);
-    setView("create");
+    setView("home");
   };
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <TopBar sessionId={sessionId} view={view} setView={setView} reset={resetSession} />
-      {!sessionId || view === "create" ? (
-        <CreateSessionPage onCreated={(id) => openSession(id, "progress")} onOpened={(id) => openSession(id, "progress")} />
+      <TopBar sessionId={sessionId} view={view} setView={setView} reset={reset} />
+      {!sessionId || view === "home" ? (
+        <HomePage onCreated={(id) => openSession(id, "progress")} />
       ) : view === "progress" ? (
-        <ProgressPage sessionId={sessionId} onReady={() => setView("learn")} />
-      ) : view === "learn" ? (
-        <LearningWorkspacePage
-          sessionId={sessionId}
-          openProgress={() => setView("progress")}
-          openPractice={() => setView("practice")}
-          openCard={() => setView("card")}
-        />
-      ) : view === "practice" ? (
-        <PracticePage sessionId={sessionId} />
+        <ProgressPage sessionId={sessionId} onReady={() => setView("lesson")} />
+      ) : view === "lesson" ? (
+        <LessonPage sessionId={sessionId} openProgress={() => setView("progress")} openCard={() => setView("card")} />
       ) : (
-        <LearningCardPage sessionId={sessionId} />
+        <LearningCardPage sessionId={sessionId} backToLesson={() => setView("lesson")} />
       )}
     </main>
   );
@@ -113,197 +110,86 @@ function TopBar({
   reset: () => void;
 }) {
   return (
-    <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur">
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Layers className="h-4 w-4" />
-          </div>
-          <div>
-            <div className="text-sm font-semibold">TechLeveler</div>
-            <div className="text-xs text-muted-foreground">Session {sessionId ?? "-"}</div>
-          </div>
-        </div>
-        <nav className="flex items-center gap-1">
-          {sessionId ? (
-            <>
-              <Button variant={view === "progress" ? "subtle" : "ghost"} size="sm" onClick={() => setView("progress")}>
-                进度
-              </Button>
-              <Button variant={view === "learn" ? "subtle" : "ghost"} size="sm" onClick={() => setView("learn")}>
-                学习
-              </Button>
-              <Button variant={view === "practice" ? "subtle" : "ghost"} size="sm" onClick={() => setView("practice")}>
-                Boss
-              </Button>
-              <Button variant={view === "card" ? "subtle" : "ghost"} size="sm" onClick={() => setView("card")}>
-                卡片
-              </Button>
-            </>
-          ) : null}
-          <Button variant="outline" size="sm" onClick={reset}>
-            新建
-          </Button>
-        </nav>
+    <header className="border-b border-border bg-background">
+      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5">
+        <button className="text-sm font-semibold tracking-tight" onClick={reset}>
+          TechLeveler
+        </button>
+        {sessionId ? (
+          <nav className="flex items-center gap-1 text-sm">
+            <Button variant={view === "progress" ? "subtle" : "ghost"} size="sm" onClick={() => setView("progress")}>
+              Progress
+            </Button>
+            <Button variant={view === "lesson" ? "subtle" : "ghost"} size="sm" onClick={() => setView("lesson")}>
+              Lesson
+            </Button>
+            <Button variant={view === "card" ? "subtle" : "ghost"} size="sm" onClick={() => setView("card")}>
+              Card
+            </Button>
+            <Button variant="outline" size="sm" onClick={reset}>
+              New
+            </Button>
+          </nav>
+        ) : null}
       </div>
     </header>
   );
 }
 
-function CreateSessionPage({
-  onCreated,
-  onOpened,
-}: {
-  onCreated: (sessionId: number) => void;
-  onOpened: (sessionId: number) => void;
-}) {
+function HomePage({ onCreated }: { onCreated: (sessionId: number) => void }) {
   const [techName, setTechName] = useState("LangGraph");
-  const [userLevel, setUserLevel] = useState("beginner");
-  const [learningGoal, setLearningGoal] = useState("理解什么时候应该使用目标技术，而不是普通写法。");
-  const [existingSessionId, setExistingSessionId] = useState("");
-
   const createMutation = useMutation({
     mutationFn: createLearningSession,
     onSuccess: (data) => onCreated(data.session_id),
   });
-  const openMutation = useMutation({
-    mutationFn: async (id: number) => getLearningSession(id),
-    onSuccess: (session) => onOpened(session.id),
-  });
-  const sessionsQuery = useQuery({ queryKey: ["learning-sessions"], queryFn: () => listLearningSessions(20) });
 
   return (
-    <section className="mx-auto grid max-w-6xl gap-5 px-4 py-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold">开始一条真实学习链路</h1>
-          <p className="text-sm text-muted-foreground">创建后后端会立即返回 session_id，LLM 生成会在 Celery worker 里异步执行。</p>
+    <section className="mx-auto flex min-h-[calc(100vh-56px)] max-w-3xl flex-col justify-center px-5 py-12">
+      <div className="space-y-8">
+        <div className="space-y-3">
+          <h1 className="text-4xl font-semibold tracking-tight">TechLeveler</h1>
+          <p className="max-w-xl text-base text-muted-foreground">
+            Build intuition for a new tech stack through comparison and practice.
+          </p>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>新建 Session</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form
-              className="space-y-4"
-              onSubmit={(event) => {
-                event.preventDefault();
-                createMutation.mutate({ tech_name: techName.trim(), user_level: userLevel, learning_goal: learningGoal.trim() });
-              }}
-            >
-              <label className="block space-y-2">
-                <span className="text-sm font-medium">技术名</span>
-                <Input value={techName} onChange={(event) => setTechName(event.target.value)} placeholder="例如 LangGraph / Redis" />
-              </label>
-              <label className="block space-y-2">
-                <span className="text-sm font-medium">当前水平</span>
-                <select
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  value={userLevel}
-                  onChange={(event) => setUserLevel(event.target.value)}
-                >
-                  <option value="beginner">beginner</option>
-                  <option value="intermediate">intermediate</option>
-                  <option value="advanced">advanced</option>
-                </select>
-              </label>
-              <label className="block space-y-2">
-                <span className="text-sm font-medium">学习目标</span>
-                <Textarea value={learningGoal} onChange={(event) => setLearningGoal(event.target.value)} rows={4} />
-              </label>
-              {createMutation.error ? <ErrorText error={createMutation.error} /> : null}
-              <Button type="submit" disabled={createMutation.isPending || !techName.trim() || !learningGoal.trim()}>
-                {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                开始生成
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+        <form
+          className="flex flex-col gap-3 sm:flex-row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            createMutation.mutate({
+              tech_name: techName.trim(),
+              user_level: "beginner",
+              learning_goal:
+                [
+                  "请为中文学习者生成 TechLeveler 学习内容。",
+                  "所有题目、知识点、样例说明、练习任务、反思任务、验收标准、常见错误、反馈和技术卡片都使用中文呈现。",
+                  "技术名、API 名、类名、函数名、命令、代码关键字保持英文原文。",
+                  "题目请使用清晰的中文课程格式：背景、任务、要求、提交内容、验收标准。",
+                  "练习题要短小、具体、可在 10-15 分钟内完成，并围绕当前知识点，不引入后续高级概念。",
+                  "继续保留核心闭环：官方资料优先、普通写法 vs 目标技术写法、小练习、反馈、技术卡片。",
+                ].join("\n"),
+            });
+          }}
+        >
+          <Input
+            className="h-11 text-base"
+            value={techName}
+            onChange={(event) => setTechName(event.target.value)}
+            placeholder="Enter a technology, e.g. LangGraph"
+          />
+          <Button className="h-11 whitespace-nowrap" disabled={createMutation.isPending || !techName.trim()} type="submit">
+            {createMutation.isPending ? "Generating..." : "Generate learning path"}
+          </Button>
+        </form>
+        {createMutation.error ? <ErrorText error={createMutation.error} /> : null}
+
+        <div className="grid gap-3 text-sm text-muted-foreground sm:grid-cols-3">
+          <FeatureLine title="Official-first material" />
+          <FeatureLine title="Baseline vs target comparison" />
+          <FeatureLine title="Small practice tasks" />
+        </div>
       </div>
-
-      <aside className="space-y-4">
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle>已有 Session</CardTitle>
-              <Button variant="ghost" size="sm" onClick={() => sessionsQuery.refetch()} disabled={sessionsQuery.isFetching}>
-                <RotateCw className={`h-4 w-4 ${sessionsQuery.isFetching ? "animate-spin" : ""}`} />
-                刷新
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">从数据库读取最近的学习记录，点一条就能打开。</p>
-            <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
-              {sessionsQuery.isLoading ? (
-                <LoadingState label="正在读取 Session" />
-              ) : sessionsQuery.error ? (
-                <ErrorText error={sessionsQuery.error} />
-              ) : sessionsQuery.data?.length ? (
-                sessionsQuery.data.map((session) => (
-                  <button
-                    key={session.id}
-                    className="w-full rounded-md border border-border px-3 py-2 text-left text-sm transition hover:bg-accent"
-                    onClick={() => onOpened(session.id)}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium">#{session.id} {session.tech_name}</span>
-                      <Badge>{session.status}</Badge>
-                    </div>
-                    <div className="mt-1 line-clamp-1 text-xs text-muted-foreground">{session.learning_goal ?? "无学习目标"}</div>
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-                      <div className="h-full bg-primary" style={{ width: `${session.task?.progress ?? 0}%` }} />
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {session.task?.message ?? "无任务信息"} · {new Date(session.updated_at).toLocaleString()}
-                    </div>
-                  </button>
-                ))
-              ) : (
-                <p className="text-sm text-muted-foreground">数据库里暂时没有 Session。</p>
-              )}
-            </div>
-            <div className="border-t border-border pt-3">
-              <p className="mb-2 text-sm text-muted-foreground">也可以手动输入 session_id。</p>
-              <div className="flex gap-2">
-                <Input
-                  inputMode="numeric"
-                  value={existingSessionId}
-                  onChange={(event) => setExistingSessionId(event.target.value)}
-                  placeholder="例如 3"
-                />
-                <Button
-                  variant="outline"
-                  disabled={openMutation.isPending || !Number(existingSessionId)}
-                  onClick={() => openMutation.mutate(Number(existingSessionId))}
-                >
-                  {openMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}
-                  打开
-                </Button>
-              </div>
-            </div>
-            {openMutation.error ? <ErrorText error={openMutation.error} /> : null}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>生成链路</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm text-muted-foreground">
-            {generationSteps.map((step) => (
-              <div key={step.title} className="flex items-start gap-2">
-                <Circle className="mt-0.5 h-4 w-4 text-primary" />
-                <div>
-                  <div className="font-medium text-foreground">{step.title}</div>
-                  <div>{step.detail}</div>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </aside>
     </section>
   );
 }
@@ -317,364 +203,249 @@ function ProgressPage({ sessionId, onReady }: { sessionId: number; onReady: () =
       return readyStatuses.has(status ?? "") || status === "failed" ? false : 2000;
     },
   });
+
   const task = statusQuery.data?.task;
-  const progress = task?.progress ?? 0;
   const status = statusQuery.data?.status ?? "loading";
+  const progress = task?.progress ?? 0;
   const isReady = readyStatuses.has(status);
 
   return (
-    <section className="mx-auto max-w-5xl px-4 py-6">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <section className="mx-auto max-w-3xl px-5 py-10">
+      <div className="mb-8 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold">Session {sessionId} 生成进度</h1>
-          <p className="text-sm text-muted-foreground">{task?.message ?? "等待 worker 更新任务状态"}</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Generating learning path</h1>
+          <p className="mt-2 text-sm text-muted-foreground">{readableMessage(task?.message, status)}</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => statusQuery.refetch()} disabled={statusQuery.isFetching}>
-            <RotateCw className={`h-4 w-4 ${statusQuery.isFetching ? "animate-spin" : ""}`} />
-            刷新
-          </Button>
-          <Button onClick={onReady} disabled={!isReady}>
-            <BookOpen className="h-4 w-4" />
-            进入学习
-          </Button>
-        </div>
+        <Button onClick={onReady} disabled={!isReady}>
+          Open lesson
+        </Button>
       </div>
 
       <Card>
-        <CardContent className="space-y-5">
-          <div className="flex items-center justify-between text-sm">
-            <span className="font-medium">当前状态</span>
-            <Badge>{status}</Badge>
-          </div>
-          <div className="h-3 overflow-hidden rounded-full bg-muted">
-            <div className="h-full bg-primary transition-all" style={{ width: `${Math.max(0, Math.min(progress, 100))}%` }} />
-          </div>
-          <div className="grid gap-3 md:grid-cols-5">
-            {generationSteps.map((step) => (
-              <ProgressStep key={step.title} title={step.title} detail={step.detail} state={stepState(progress, step.start, step.end, status)} />
-            ))}
-          </div>
-          {task ? (
-            <div className="rounded-md border border-border bg-muted/60 p-3 text-xs text-muted-foreground">
-              <div>task_id: {task.task_id}</div>
-              <div>task_status: {task.status}</div>
-              <div>progress: {task.progress}%</div>
-              {task.error_message ? <div className="mt-2 text-red-700">error: {task.error_message}</div> : null}
-            </div>
-          ) : null}
-          {status === "failed" ? <ErrorText error={task?.error_message ?? "生成任务失败，请查看 backend / celery 日志"} /> : null}
+        <CardContent className="space-y-1 py-2">
+          {steps.map((step) => (
+            <StepRow key={step.key} label={step.label} state={stepState(progress, step.start, step.end, status)} />
+          ))}
         </CardContent>
       </Card>
+      {task?.error_message ? <div className="mt-4"><ErrorText error={task.error_message} /></div> : null}
     </section>
   );
 }
 
-function LearningWorkspacePage({
+function LessonPage({
   sessionId,
   openProgress,
-  openPractice,
   openCard,
 }: {
   sessionId: number;
   openProgress: () => void;
-  openPractice: () => void;
   openCard: () => void;
 }) {
   const queryClient = useQueryClient();
   const [selectedPointId, setSelectedPointId] = useState<number | null>(null);
-  const [selectedLevelId, setSelectedLevelId] = useState<number | null>(null);
-  const [answer, setAnswer] = useState("");
-  const [lastFeedback, setLastFeedback] = useState<FeedbackResult | null>(null);
-  const [lastSubmission, setLastSubmission] = useState<LastSubmission | null>(null);
+  const [selectedSection, setSelectedSection] = useState<LessonSection>("compare");
+  const [practiceAnswer, setPracticeAnswer] = useState("");
+  const [reflectionAnswer, setReflectionAnswer] = useState("");
+  const [submission, setSubmission] = useState<SubmissionState | null>(null);
 
   const sessionQuery = useQuery({ queryKey: ["session", sessionId], queryFn: () => getLearningSession(sessionId) });
-  const statusQuery = useQuery({ queryKey: ["session-status", sessionId], queryFn: () => getLearningSessionStatus(sessionId), refetchInterval: 5000 });
   const pointsQuery = useQuery({ queryKey: ["knowledge-points", sessionId], queryFn: () => getKnowledgePoints(sessionId) });
   const comparisonsQuery = useQuery({ queryKey: ["comparisons", sessionId], queryFn: () => getComparisons(sessionId), retry: false });
 
-  const points = pointsQuery.data ?? [];
-  const mustLearnPoints = points.filter((point) => point.category === "must_learn");
+  const points = (pointsQuery.data ?? []).filter((point) => point.category === "must_learn");
+  const fallbackPoints = points.length ? points : pointsQuery.data ?? [];
   const currentPoint = useMemo(() => {
     return (
-      points.find((point) => point.id === selectedPointId) ??
-      points.find((point) => point.id === sessionQuery.data?.current_knowledge_point_id) ??
-      points.find((point) => point.category === "must_learn") ??
-      points[0]
+      fallbackPoints.find((point) => point.id === selectedPointId) ??
+      fallbackPoints.find((point) => point.id === sessionQuery.data?.current_knowledge_point_id) ??
+      fallbackPoints[0]
     );
-  }, [points, selectedPointId, sessionQuery.data?.current_knowledge_point_id]);
+  }, [fallbackPoints, selectedPointId, sessionQuery.data?.current_knowledge_point_id]);
 
-  const levelsQuery = useQuery({
-    queryKey: ["levels", currentPoint?.id],
-    queryFn: () => getLevels(currentPoint!.id),
-    enabled: !!currentPoint,
+  const levelQueries = useQueries({
+    queries: fallbackPoints.map((point) => ({
+      queryKey: ["levels", point.id],
+      queryFn: () => getLevels(point.id),
+      enabled: !!point.id,
+    })),
   });
+
+  const levelsByPoint = useMemo(() => {
+    const result = new Map<number, LearningLevel[]>();
+    fallbackPoints.forEach((point, index) => result.set(point.id, sortLevels(levelQueries[index]?.data ?? [])));
+    return result;
+  }, [fallbackPoints, levelQueries]);
+
+  const currentLevels = currentPoint ? levelsByPoint.get(currentPoint.id) ?? [] : [];
+  const compareLevel = findLevel(currentLevels, "observe");
+  const practiceLevel = findLevel(currentLevels, "hands_on");
+  const reflectionLevel = findLevel(currentLevels, "summary");
+  const activeLevel = findLevel(currentLevels, sectionToLevelType[selectedSection]);
+
   const examplesQuery = useQuery({
     queryKey: ["examples", currentPoint?.id],
     queryFn: () => getExamples(currentPoint!.id),
     enabled: !!currentPoint,
   });
-
-  const levels = levelsQuery.data ?? [];
-  const currentLevel = useMemo(() => {
-    return (
-      levels.find((level) => level.id === selectedLevelId) ??
-      levels.find((level) => level.id === sessionQuery.data?.current_level_id) ??
-      levels[0]
-    );
-  }, [levels, selectedLevelId, sessionQuery.data?.current_level_id]);
+  const example = examplesQuery.data?.[0] ?? null;
+  const comparison = comparisonsQuery.data?.[0];
 
   const submitMutation = useMutation({
-    mutationFn: async () => {
-      if (!currentLevel) throw new Error("当前没有可提交的关卡");
-      const submission = await submitAnswer(currentLevel.id, answer);
-      const feedback = await getFeedback(submission.answer_id);
-      const nextLevel = submission.next_level_id ? await getLevel(submission.next_level_id) : null;
-      return { submission, feedback, nextLevel };
+    mutationFn: async ({ level, answer, kind }: { level: LearningLevel; answer: string; kind: "practice" | "reflection" }) => {
+      const response = await submitAnswer(level.id, answer);
+      const feedback = await getFeedback(response.answer_id);
+      const nextLevel = response.next_level_id ? await getLevel(response.next_level_id) : null;
+      return { response, feedback, nextLevel, kind };
     },
-    onSuccess: ({ submission, feedback, nextLevel }) => {
-      setLastFeedback(feedback);
-      setLastSubmission({ result: submission.result, message: submission.message, nextLevelId: submission.next_level_id });
-      if (submission.result === "pass") {
-        setAnswer("");
-        if (nextLevel) {
-          setSelectedPointId(nextLevel.knowledge_point_id);
-          setSelectedLevelId(nextLevel.id);
-        }
+    onSuccess: ({ response, feedback, nextLevel, kind }) => {
+      setSubmission({ kind, feedback, message: response.message, nextLevelId: response.next_level_id });
+      if (response.result === "pass" && nextLevel) {
+        setSelectedPointId(nextLevel.knowledge_point_id);
       }
       queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
-      queryClient.invalidateQueries({ queryKey: ["session-status", sessionId] });
-      queryClient.invalidateQueries({ queryKey: ["knowledge-points", sessionId] });
     },
   });
 
   if (pointsQuery.isLoading || sessionQuery.isLoading) {
-    return <LoadingState label="正在加载学习工作台" />;
+    return <LoadingState label="Loading lesson" />;
   }
 
-  if (!points.length) {
+  if (!fallbackPoints.length) {
     return (
       <EmptyPage
-        title="还没有知识点"
-        description="这个 Session 可能仍在生成中。请先回到进度页观察 Celery 任务状态。"
-        actionLabel="查看进度"
+        title="No lesson content yet"
+        description="Generation may still be running."
+        actionLabel="View progress"
         onAction={openProgress}
       />
     );
   }
 
-  const status = statusQuery.data?.status ?? sessionQuery.data?.status ?? "unknown";
-  const comparison = comparisonsQuery.data?.[0];
-
   return (
-    <section className="grid min-h-[calc(100vh-56px)] grid-cols-1 gap-4 px-4 py-4 lg:grid-cols-[300px_minmax(0,1fr)_360px]">
-      <aside className="space-y-3">
-        <StatusStrip status={status} message={statusQuery.data?.task?.message ?? null} />
-        <PanelTitle icon={<Target className="h-4 w-4" />} title={`知识点 ${mustLearnPoints.length || points.length} 个`} />
-        <div className="space-y-2">
-          {points.map((point) => (
-            <button
-              key={point.id}
-              className={`w-full rounded-md border px-3 py-2 text-left text-sm transition ${
-                point.id === currentPoint?.id ? "border-primary bg-accent" : "border-border hover:bg-accent"
-              }`}
-              onClick={() => {
-                setSelectedPointId(point.id);
-                setSelectedLevelId(null);
-                setLastFeedback(null);
-                setLastSubmission(null);
-              }}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-medium">{point.sort_order}. {point.title}</span>
-                <Badge>{point.category ?? "unknown"}</Badge>
-              </div>
-              <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{point.reason ?? point.goal}</div>
-            </button>
-          ))}
-        </div>
-        <PanelTitle icon={<ClipboardCheck className="h-4 w-4" />} title="当前知识点关卡" />
-        <div className="grid gap-2">
-          {levels.map((level) => (
-            <Button
-              key={level.id}
-              className="justify-start"
-              variant={level.id === currentLevel?.id ? "subtle" : "outline"}
-              onClick={() => {
-                setSelectedLevelId(level.id);
-                setLastFeedback(null);
-                setLastSubmission(null);
-              }}
-            >
-              <LevelTypeLabel type={level.type} />
-              {level.title}
-            </Button>
-          ))}
-        </div>
-      </aside>
-
-      <section className="space-y-4">
-        <Card>
-          <CardHeader>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle className="text-base">{currentPoint?.title ?? "知识点"}</CardTitle>
-              <Badge>{currentPoint?.difficulty ?? "difficulty"}</Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">{currentPoint?.goal}</p>
-            {currentPoint?.depends_on?.length ? (
-              <div className="text-xs text-muted-foreground">依赖：{currentPoint.depends_on.join(" / ")}</div>
-            ) : null}
-            <MarkdownBlock>{examplesMarkdown(examplesQuery.data ?? [])}</MarkdownBlock>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle className="text-base">{currentLevel?.title ?? "当前关卡"}</CardTitle>
-              {currentLevel ? <Badge><LevelTypeLabel type={currentLevel.type} /></Badge> : null}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <MarkdownBlock>{currentLevel?.task ?? "暂无关卡任务"}</MarkdownBlock>
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <label className="text-sm font-medium">答题区</label>
-                <span className="text-xs text-muted-foreground">支持文字、代码和 Markdown</span>
-              </div>
-              <div className="overflow-hidden rounded-md border border-border">
-                <Editor
-                  height="260px"
-                  defaultLanguage="markdown"
-                  theme="vs-light"
-                  value={answer}
-                  onChange={(value) => setAnswer(value ?? "")}
-                  options={{ minimap: { enabled: false }, wordWrap: "on", fontSize: 14, scrollBeyondLastLine: false }}
-                />
-              </div>
-            </div>
-            {submitMutation.error ? <ErrorText error={submitMutation.error} /> : null}
-            <div className="flex flex-wrap gap-2">
-              <Button disabled={!answer.trim() || submitMutation.isPending || !currentLevel} onClick={() => submitMutation.mutate()}>
-                {submitMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                提交答案
-              </Button>
-              <Button variant="outline" onClick={() => setAnswer("")} disabled={!answer}>
-                清空
-              </Button>
-            </div>
-            {lastSubmission ? <SubmissionMessage submission={lastSubmission} /> : null}
-            {lastFeedback ? <FeedbackPanel feedback={lastFeedback} /> : null}
-          </CardContent>
-        </Card>
-      </section>
-
+    <section className="mx-auto grid max-w-7xl grid-cols-1 gap-6 px-5 py-6 lg:grid-cols-[260px_minmax(0,1fr)_300px]">
       <aside className="space-y-4">
-        <SidePanel title="提示">
-          <p>{currentLevel?.hint ?? "暂无提示"}</p>
-        </SidePanel>
-        <SidePanel title="验收标准">
-          <List items={currentLevel?.acceptance_criteria ?? []} />
-        </SidePanel>
-        <SidePanel title="常见错误">
-          <List items={currentLevel?.common_mistakes ?? []} />
-        </SidePanel>
-        <SidePanel title="技术边界">
-          <p className="font-medium text-foreground">同一个小任务</p>
-          <p>{comparison?.comparison_task ?? "暂无对比结果"}</p>
-          <p className="mt-3 font-medium text-foreground">什么时候用</p>
-          <List items={comparison?.when_to_use ?? []} />
-          <p className="mt-3 font-medium text-foreground">什么时候不用</p>
-          <List items={comparison?.when_not_to_use ?? []} />
-        </SidePanel>
-        <div className="grid grid-cols-2 gap-2">
-          <Button variant="outline" onClick={openPractice}>
-            <Target className="h-4 w-4" />
-            Boss 题
-          </Button>
-          <Button variant="outline" onClick={openCard}>
-            <FileText className="h-4 w-4" />
-            卡片
-          </Button>
+        <div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">Contents</div>
+          <h2 className="mt-1 text-lg font-semibold">{sessionQuery.data?.tech_name ?? "Lesson"}</h2>
         </div>
+        <nav className="space-y-4">
+          {fallbackPoints.map((point, index) => (
+            <div key={point.id} className="space-y-1">
+              <button
+                className={`block w-full text-left text-sm font-medium ${point.id === currentPoint?.id ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                onClick={() => {
+                  setSelectedPointId(point.id);
+                  setSelectedSection("compare");
+                  setSubmission(null);
+                }}
+              >
+                {index + 1}. {point.title}
+              </button>
+              <div className="ml-3 grid gap-1 border-l border-border pl-3">
+                {(["compare", "practice", "reflect"] as LessonSection[]).map((section) => (
+                  <button
+                    key={section}
+                    className={`text-left text-xs ${point.id === currentPoint?.id && selectedSection === section ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                    onClick={() => {
+                      setSelectedPointId(point.id);
+                      setSelectedSection(section);
+                      setSubmission(null);
+                    }}
+                  >
+                    {sectionLabels[section]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </nav>
+      </aside>
+
+      <article className="space-y-8">
+        <LessonSectionBlock title="Overview">
+          <h1 className="text-2xl font-semibold tracking-tight">{currentPoint?.title}</h1>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">{currentPoint?.goal}</p>
+          {currentPoint?.reason ? <p className="mt-2 text-sm leading-6 text-muted-foreground">{currentPoint.reason}</p> : null}
+        </LessonSectionBlock>
+
+        <LessonSectionBlock title="Baseline">
+          <CodeBlock value={example?.baseline_example} />
+          <p className="mt-3 text-sm text-muted-foreground">How this is typically handled without the target technology.</p>
+        </LessonSectionBlock>
+
+        <LessonSectionBlock title="Target">
+          <CodeBlock value={example?.target_example} />
+          <p className="mt-3 text-sm text-muted-foreground">How the target technology changes the shape of the solution.</p>
+        </LessonSectionBlock>
+
+        <LessonSectionBlock title="What to notice">
+          <List items={example?.observe_questions ?? []} />
+          {compareLevel?.task ? <MarkdownBlock>{compareLevel.task}</MarkdownBlock> : null}
+        </LessonSectionBlock>
+
+        <LessonSectionBlock title="Practice">
+          <MarkdownBlock>{practiceLevel?.task ?? activeLevel?.task ?? "暂无练习题。"}</MarkdownBlock>
+          <AnswerEditor value={practiceAnswer} onChange={setPracticeAnswer} height="240px" />
+          <div className="mt-3">
+            <Button
+              disabled={!practiceLevel || !practiceAnswer.trim() || submitMutation.isPending}
+              onClick={() => practiceLevel && submitMutation.mutate({ level: practiceLevel, answer: practiceAnswer, kind: "practice" })}
+            >
+              {submitMutation.isPending ? "Submitting..." : "Submit answer"}
+            </Button>
+          </div>
+        </LessonSectionBlock>
+
+        <LessonSectionBlock title="Reflection">
+          <MarkdownBlock>{reflectionLevel?.task ?? "请用自己的话总结：普通写法和目标技术写法相比，结构、职责或使用时机发生了什么变化。"}</MarkdownBlock>
+          <AnswerEditor value={reflectionAnswer} onChange={setReflectionAnswer} height="180px" />
+          <div className="mt-3">
+            <Button
+              variant="outline"
+              disabled={!reflectionLevel || !reflectionAnswer.trim() || submitMutation.isPending}
+              onClick={() => reflectionLevel && submitMutation.mutate({ level: reflectionLevel, answer: reflectionAnswer, kind: "reflection" })}
+            >
+              Submit reflection
+            </Button>
+          </div>
+        </LessonSectionBlock>
+
+        {submitMutation.error ? <ErrorText error={submitMutation.error} /> : null}
+        {submission ? <FeedbackPanel submission={submission} /> : null}
+      </article>
+
+      <aside className="space-y-5">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">Notes</div>
+          <h2 className="mt-1 text-lg font-semibold">{sectionLabels[selectedSection]}</h2>
+        </div>
+        <NoteBlock title="Hint">
+          <p>{activeLevel?.hint ?? practiceLevel?.hint ?? "No hint yet."}</p>
+        </NoteBlock>
+        <NoteBlock title="Acceptance criteria">
+          <List items={activeLevel?.acceptance_criteria ?? practiceLevel?.acceptance_criteria ?? []} />
+        </NoteBlock>
+        <NoteBlock title="Common mistakes">
+          <List items={activeLevel?.common_mistakes ?? practiceLevel?.common_mistakes ?? []} />
+        </NoteBlock>
+        <NoteBlock title="When to use">
+          <List items={comparison?.when_to_use ?? []} />
+        </NoteBlock>
+        <NoteBlock title="When not to use">
+          <List items={comparison?.when_not_to_use ?? []} />
+        </NoteBlock>
+        <Button variant="outline" className="w-full" onClick={openCard}>
+          View technical card
+        </Button>
       </aside>
     </section>
   );
 }
 
-function PracticePage({ sessionId }: { sessionId: number }) {
+function LearningCardPage({ sessionId, backToLesson }: { sessionId: number; backToLesson: () => void }) {
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState(localStorage.getItem(`techleveler.practice_draft.${sessionId}`) ?? "");
-  const practiceQuery = useQuery({
-    queryKey: ["practice", sessionId],
-    queryFn: () => getPracticeTask(sessionId),
-    retry: false,
-  });
-  const generateMutation = useMutation({
-    mutationFn: () => generatePracticeTask(sessionId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["practice", sessionId] }),
-  });
-  const task = practiceQuery.data ?? generateMutation.data;
-
-  const saveDraft = (value: string) => {
-    setDraft(value);
-    localStorage.setItem(`techleveler.practice_draft.${sessionId}`, value);
-  };
-
-  return (
-    <section className="mx-auto grid max-w-6xl gap-4 px-4 py-6 lg:grid-cols-[minmax(0,1fr)_420px]">
-      <Card>
-        <CardHeader>
-          <CardTitle>实战 Boss 题</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {task ? (
-            <PracticeTaskView task={task} />
-          ) : (
-            <>
-              <p className="text-sm text-muted-foreground">当 must_learn 关卡全部通过后，可以生成实战题。</p>
-              {practiceQuery.error ? <ErrorText error={practiceQuery.error} /> : null}
-              {generateMutation.error ? <ErrorText error={generateMutation.error} /> : null}
-              <Button onClick={() => generateMutation.mutate()} disabled={generateMutation.isPending}>
-                {generateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Target className="h-4 w-4" />}
-                生成实战题
-              </Button>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>实战草稿区</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">这里先作为本地草稿保存，后端目前没有实战题提交接口。</p>
-          <div className="overflow-hidden rounded-md border border-border">
-            <Editor
-              height="520px"
-              defaultLanguage="markdown"
-              theme="vs-light"
-              value={draft}
-              onChange={(value) => saveDraft(value ?? "")}
-              options={{ minimap: { enabled: false }, wordWrap: "on", fontSize: 14, scrollBeyondLastLine: false }}
-            />
-          </div>
-        </CardContent>
-      </Card>
-    </section>
-  );
-}
-
-function LearningCardPage({ sessionId }: { sessionId: number }) {
-  const queryClient = useQueryClient();
-  const cardQuery = useQuery({
-    queryKey: ["card", sessionId],
-    queryFn: () => getLearningCard(sessionId),
-    retry: false,
-  });
+  const cardQuery = useQuery({ queryKey: ["card", sessionId], queryFn: () => getLearningCard(sessionId), retry: false });
   const generateMutation = useMutation({
     mutationFn: () => generateLearningCard(sessionId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["card", sessionId] }),
@@ -682,192 +453,165 @@ function LearningCardPage({ sessionId }: { sessionId: number }) {
   const card = cardQuery.data ?? generateMutation.data;
 
   return (
-    <section className="mx-auto max-w-5xl px-4 py-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>技术卡片</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {card ? (
-            <MarkdownBlock>
-              {card.card_markdown ??
-                `# ${card.tech_name}\n\n## 痛点\n${card.pain_point}\n\n## 普通方案\n${card.baseline_solution}\n\n## 目标技术优势\n${card.target_advantage}\n\n## 最小样例\n${card.minimal_example}\n\n## 我的理解\n${card.my_understanding}`}
-            </MarkdownBlock>
-          ) : (
-            <>
-              <p className="text-sm text-muted-foreground">完成学习和实战后，可以生成个人技术卡片。</p>
-              {cardQuery.error ? <ErrorText error={cardQuery.error} /> : null}
-              {generateMutation.error ? <ErrorText error={generateMutation.error} /> : null}
-              <Button onClick={() => generateMutation.mutate()} disabled={generateMutation.isPending}>
-                {generateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                生成技术卡片
-              </Button>
-            </>
-          )}
-        </CardContent>
-      </Card>
+    <section className="mx-auto max-w-4xl px-5 py-8">
+      <div className="mb-8 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Technical card</h1>
+          <p className="mt-2 text-sm text-muted-foreground">A compact document for review after the lesson.</p>
+        </div>
+        <Button variant="outline" onClick={backToLesson}>
+          Back to lesson
+        </Button>
+      </div>
+
+      {card ? (
+        <CardDocument card={card} />
+      ) : (
+        <Card>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">No technical card has been generated yet.</p>
+            {cardQuery.error ? <ErrorText error={cardQuery.error} /> : null}
+            {generateMutation.error ? <ErrorText error={generateMutation.error} /> : null}
+            <Button disabled={generateMutation.isPending} onClick={() => generateMutation.mutate()}>
+              {generateMutation.isPending ? "Generating..." : "Generate technical card"}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
     </section>
   );
 }
 
-function ProgressStep({ title, detail, state }: { title: string; detail: string; state: "done" | "active" | "pending" | "failed" }) {
-  const icon =
-    state === "done" ? (
-      <CheckCircle2 className="h-4 w-4 text-emerald-700" />
-    ) : state === "active" ? (
-      <Loader2 className="h-4 w-4 animate-spin text-primary" />
-    ) : state === "failed" ? (
-      <AlertCircle className="h-4 w-4 text-red-700" />
-    ) : (
-      <Circle className="h-4 w-4 text-muted-foreground" />
-    );
-  return (
-    <div className="rounded-md border border-border p-3">
-      <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-        {icon}
-        {title}
-      </div>
-      <p className="text-xs text-muted-foreground">{detail}</p>
-    </div>
-  );
-}
-
-function stepState(progress: number, start: number, end: number, status: string): "done" | "active" | "pending" | "failed" {
-  if (status === "failed") return progress >= start && progress < end ? "failed" : progress >= end ? "done" : "pending";
-  if (progress >= end) return "done";
-  if (progress >= start) return "active";
-  return "pending";
-}
-
-function StatusStrip({ status, message }: { status: string; message: string | null }) {
-  return (
-    <div className="rounded-md border border-border bg-muted/50 px-3 py-2 text-sm">
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-medium">状态</span>
-        <Badge>{status}</Badge>
-      </div>
-      {message ? <p className="mt-1 text-xs text-muted-foreground">{message}</p> : null}
-    </div>
-  );
-}
-
-function FeedbackPanel({ feedback }: { feedback: FeedbackResult }) {
-  const color = feedback.result === "pass" ? "text-emerald-700" : feedback.result === "partial" ? "text-amber-700" : "text-red-700";
-  return (
-    <div className="rounded-md border border-border bg-muted p-3 text-sm">
-      <div className={`mb-2 font-semibold ${color}`}>{feedback.result}</div>
-      <p>{feedback.feedback}</p>
-      <div className="mt-3 grid gap-3 md:grid-cols-3">
-        <div>
-          <div className="font-medium">正确点</div>
-          <List items={feedback.correct_points} />
-        </div>
-        <div>
-          <div className="font-medium">缺失点</div>
-          <List items={feedback.missing_points} />
-        </div>
-        <div>
-          <div className="font-medium">复习建议</div>
-          <List items={feedback.suggested_review_points} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SubmissionMessage({ submission }: { submission: LastSubmission }) {
-  return (
-    <div className="rounded-md border border-border px-3 py-2 text-sm">
-      <div className="font-medium">提交结果：{submission.result}</div>
-      <div className="mt-1 text-muted-foreground">{submission.message}</div>
-      {submission.result === "pass" && submission.nextLevelId ? (
-        <div className="mt-1 text-xs text-muted-foreground">已进入下一关：Level {submission.nextLevelId}</div>
-      ) : null}
-    </div>
-  );
-}
-
-function PracticeTaskView({ task }: { task: PracticeTask }) {
-  return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="text-xl font-semibold">{task.title}</h2>
-        <p className="mt-2 text-sm text-muted-foreground">{task.background}</p>
-      </div>
-      <SidePanel title="必须覆盖的知识点">
-        <List items={task.required_points} />
-      </SidePanel>
-      <SidePanel title="任务要求">
-        <List items={task.task_requirements} />
-      </SidePanel>
-      <SidePanel title="普通方案 vs 目标技术方案">
-        <p>{task.comparison_requirement}</p>
-      </SidePanel>
-      <SidePanel title="验收标准">
-        <List items={task.acceptance_criteria} />
-      </SidePanel>
-      <SidePanel title="复盘问题">
-        <List items={task.review_questions} />
-      </SidePanel>
-    </div>
-  );
-}
-
-function examplesMarkdown(examples: LearningExample[]) {
-  if (!examples.length) return "暂无样例。";
-  const example = examples[0];
-  return [
-    "### 官方样例",
-    example.official_example,
-    "### 初学者样例",
-    example.beginner_example,
-    "### 普通写法",
-    example.baseline_example,
-    "### 目标技术写法",
-    example.target_example,
-    example.observe_questions?.length ? `### 观察问题\n${example.observe_questions.map((question) => `- ${question}`).join("\n")}` : null,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-function SidePanel({ title, children }: { title: string; children: ReactNode }) {
+function CardDocument({ card }: { card: LearningCard }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{title}</CardTitle>
+        <CardTitle className="text-xl">{card.tech_name}</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2 text-sm text-muted-foreground">{children}</CardContent>
+      <CardContent className="space-y-8">
+        <DocumentField title="What it solves" value={card.pain_point} />
+        <DocumentField title="Baseline solution" value={card.baseline_solution} />
+        <DocumentField title="Why baseline becomes messy" value={card.target_advantage} />
+        <DocumentField title="When to use" value={card.when_to_use} />
+        <DocumentField title="When not to use" value={card.when_not_to_use} />
+        <DocumentField title="Minimal example" value={card.minimal_example} />
+        <DocumentField title="My understanding" value={card.my_understanding} />
+      </CardContent>
     </Card>
   );
 }
 
-function PanelTitle({ icon, title }: { icon: ReactNode; title: string }) {
+function FeatureLine({ title }: { title: string }) {
+  return <div className="border-t border-border pt-3">{title}</div>;
+}
+
+function StepRow({ label, state }: { label: string; state: "done" | "active" | "pending" | "failed" }) {
   return (
-    <div className="flex items-center gap-2 text-sm font-semibold">
-      {icon}
-      {title}
+    <div className="flex items-center justify-between border-b border-border py-3 last:border-b-0">
+      <span className={state === "pending" ? "text-muted-foreground" : "text-foreground"}>{label}</span>
+      <span className="text-xs text-muted-foreground">{state === "done" ? "Done" : state === "active" ? "In progress" : state === "failed" ? "Failed" : ""}</span>
     </div>
   );
 }
 
-function LevelTypeLabel({ type }: { type: string }) {
-  const labels: Record<string, string> = {
-    observe: "体感关",
-    hands_on: "动手关",
-    summary: "总结关",
-  };
-  return <span>{labels[type] ?? type}</span>;
+function LessonSectionBlock({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="border-b border-border pb-8 last:border-b-0">
+      <div className="mb-4 text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</div>
+      {children}
+    </section>
+  );
+}
+
+function NoteBlock({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="border-b border-border pb-4">
+      <div className="mb-2 text-sm font-semibold">{title}</div>
+      <div className="text-sm leading-6 text-muted-foreground">{children}</div>
+    </section>
+  );
+}
+
+function DocumentField({ title, value }: { title: string; value: string | string[] }) {
+  return (
+    <section>
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">{title}</h2>
+      {Array.isArray(value) ? <List items={value} /> : <MarkdownBlock>{value || "暂无内容。"}</MarkdownBlock>}
+    </section>
+  );
+}
+
+function AnswerEditor({ value, onChange, height }: { value: string; onChange: (value: string) => void; height: string }) {
+  return (
+    <div className="mt-4 overflow-hidden rounded-md border border-border bg-white">
+      <Editor
+        height={height}
+        defaultLanguage="markdown"
+        theme="vs-light"
+        value={value}
+        onChange={(next) => onChange(next ?? "")}
+        options={{ minimap: { enabled: false }, wordWrap: "on", fontSize: 14, scrollBeyondLastLine: false }}
+      />
+    </div>
+  );
+}
+
+function CodeBlock({ value }: { value: string | null | undefined }) {
+  return (
+    <pre className="code-block overflow-auto rounded-md border border-border p-4 text-sm leading-6">
+      <code>{value?.trim() || "暂无样例。"}</code>
+    </pre>
+  );
+}
+
+function FeedbackPanel({ submission }: { submission: SubmissionState }) {
+  const result = submission.feedback.result;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Feedback: {result === "pass" ? "Pass" : result === "partial" ? "Partial" : "Needs work"}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4 text-sm">
+        <p className="text-muted-foreground">{submission.feedback.feedback || submission.message}</p>
+        <div className="grid gap-4 md:grid-cols-3">
+          <DocumentField title="Correct" value={submission.feedback.correct_points} />
+          <DocumentField title="Missing" value={submission.feedback.missing_points} />
+          <DocumentField title="Review" value={submission.feedback.suggested_review_points} />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function readableMessage(message: string | null | undefined, status: string) {
+  if (status === "failed") return "Generation failed.";
+  if (status === "partial") return "Some content is ready. You can start the lesson and continue from there.";
+  if (readyStatuses.has(status)) return "Ready";
+  return message ? messageText[message] ?? message : "Waiting for the generation task to start.";
+}
+
+function stepState(progress: number, start: number, end: number, status: string): "done" | "active" | "pending" | "failed" {
+  if (status === "failed") return progress >= start && progress < end ? "failed" : progress >= end ? "done" : "pending";
+  if (progress >= end || readyStatuses.has(status)) return "done";
+  if (progress >= start) return "active";
+  return "pending";
+}
+
+function sortLevels(levels: LearningLevel[]) {
+  const order: Record<string, number> = { observe: 1, hands_on: 2, summary: 3 };
+  return [...levels].sort((a, b) => (order[a.type] ?? 99) - (order[b.type] ?? 99) || a.sort_order - b.sort_order);
+}
+
+function findLevel(levels: LearningLevel[], type: string) {
+  return levels.find((level) => level.type === type) ?? null;
 }
 
 function List({ items }: { items: string[] }) {
-  if (!items.length) return <p className="text-sm text-muted-foreground">暂无</p>;
+  if (!items.length) return <p>暂无内容。</p>;
   return (
     <ul className="space-y-1">
       {items.map((item, index) => (
-        <li key={`${item}-${index}`} className="text-sm text-muted-foreground">
-          {item}
-        </li>
+        <li key={`${item}-${index}`}>{item}</li>
       ))}
     </ul>
   );
@@ -882,12 +626,7 @@ function MarkdownBlock({ children }: { children: string }) {
 }
 
 function LoadingState({ label }: { label: string }) {
-  return (
-    <div className="flex min-h-[320px] items-center justify-center gap-2 text-sm text-muted-foreground">
-      <Loader2 className="h-4 w-4 animate-spin" />
-      {label}
-    </div>
-  );
+  return <div className="flex min-h-[320px] items-center justify-center text-sm text-muted-foreground">{label}</div>;
 }
 
 function EmptyPage({
@@ -902,12 +641,12 @@ function EmptyPage({
   onAction: () => void;
 }) {
   return (
-    <section className="mx-auto max-w-xl px-4 py-12">
+    <section className="mx-auto max-w-xl px-5 py-12">
       <Card>
         <CardHeader>
           <CardTitle>{title}</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">{description}</p>
           <Button onClick={onAction}>{actionLabel}</Button>
         </CardContent>
@@ -917,10 +656,13 @@ function EmptyPage({
 }
 
 function ErrorText({ error }: { error: unknown }) {
-  return (
-    <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-      <AlertCircle className="mt-0.5 h-4 w-4 flex-none" />
-      <span>{error instanceof Error ? error.message : String(error)}</span>
-    </div>
-  );
+  return <div className="rounded-md border border-border bg-white px-3 py-2 text-sm text-muted-foreground">{friendlyError(error)}</div>;
+}
+
+function friendlyError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("No official source configured")) return "Official source is not configured for this technology.";
+  if (message.includes("JSON") || message.includes("parse")) return "The generated content format was invalid. Please regenerate.";
+  if (message.includes("timeout") || message.includes("running too long")) return "Generation is taking longer than expected.";
+  return message;
 }
