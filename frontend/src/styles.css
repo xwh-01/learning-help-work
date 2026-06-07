@@ -22,6 +22,7 @@
 
 body {
   margin: 0;
+  background: hsl(var(--background));
   font-family:
     Inter,
     ui-sans-serif,
@@ -37,4 +38,64 @@ input,
 textarea,
 select {
   font: inherit;
+}
+
+.markdown {
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  margin: 1rem 0 0.5rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.markdown h1 {
+  font-size: 1.25rem;
+}
+
+.markdown h2 {
+  font-size: 1.05rem;
+}
+
+.markdown h3 {
+  font-size: 0.95rem;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown pre {
+  margin: 0.5rem 0;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 1.25rem;
+}
+
+.markdown li {
+  margin: 0.25rem 0;
+}
+
+.markdown code {
+  border-radius: 0.25rem;
+  background: hsl(var(--muted));
+  padding: 0.1rem 0.25rem;
+  font-size: 0.85em;
+}
+
+.markdown pre {
+  overflow-x: auto;
+  border-radius: 0.375rem;
+  background: hsl(var(--muted));
+  padding: 0.75rem;
+}
+
+.markdown pre code {
+  background: transparent;
+  padding: 0;
 }

@@ -24,6 +24,10 @@ class LearningSessionRepository:
         stmt = select(LearningSession).where(LearningSession.id == session_id)
         return self.db.execute(stmt).scalar_one_or_none()
 
+    def list_recent(self, *, limit: int = 20) -> list[LearningSession]:
+        stmt = select(LearningSession).order_by(desc(LearningSession.created_at), desc(LearningSession.id)).limit(limit)
+        return list(self.db.execute(stmt).scalars().all())
+
     def set_status(self, session_id: int, status: str) -> None:
         session = self.get(session_id)
         if session is None:

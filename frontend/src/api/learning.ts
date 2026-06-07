@@ -20,6 +20,9 @@ export const createLearningSession = (body: CreateLearningSessionRequest) =>
 export const getLearningSession = (sessionId: number) =>
   apiGet<LearningSession>(`/api/learning-sessions/${sessionId}`);
 
+export const listLearningSessions = (limit = 20) =>
+  apiGet<LearningSession[]>(`/api/learning-sessions?limit=${limit}`);
+
 export const getLearningSessionStatus = (sessionId: number) =>
   apiGet<LearningSessionStatus>(`/api/learning-sessions/${sessionId}/status`);
 

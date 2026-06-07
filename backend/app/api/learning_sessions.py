@@ -108,6 +108,18 @@ def resume_learning_session(session_id: int, db: Session = Depends(get_db)) -> L
     )
 
 
+@router.get("", response_model=list[LearningSessionRead])
+def list_learning_sessions(limit: int = 20, db: Session = Depends(get_db)) -> list[LearningSessionRead]:
+    session_repository = LearningSessionRepository(db)
+    task_repository = AsyncTaskRepository(db)
+    safe_limit = max(1, min(limit, 100))
+    sessions = session_repository.list_recent(limit=safe_limit)
+    return [
+        _to_session_read(learning_session, task_repository.latest_by_session_id(learning_session.id))
+        for learning_session in sessions
+    ]
+
+
 @router.get("/{session_id}", response_model=LearningSessionRead)
 def get_learning_session(session_id: int, db: Session = Depends(get_db)) -> LearningSessionRead:
     session_repository = LearningSessionRepository(db)
