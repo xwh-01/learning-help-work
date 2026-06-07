@@ -62,3 +62,19 @@ relations:
       - ELK log analytics
       - Jaeger tracing
       - Datadog
+
+  fastapi:
+    tech_name: FastAPI
+    aliases:
+      - fastapi
+      - FastAPI
+    baseline:
+      - Flask / Django REST framework
+    similar:
+      - Litestar
+      - Starlette
+      - Sanic
+    skip_now:
+      - Django Ninja
+      - Falcon
+      - AIOHTTP

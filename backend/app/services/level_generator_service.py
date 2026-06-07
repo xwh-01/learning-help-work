@@ -61,6 +61,8 @@ class LevelGeneratorService:
             if point.category != "must_learn":
                 continue
             existing_types = existing_by_point.get(point.id, set())
+            if existing_types:
+                levels.extend(self.repository.list_levels_by_knowledge_point(point.id))
             for sort_order, level_type in enumerate(self.LEVEL_TYPES, start=1):
                 if level_type in existing_types:
                     continue

@@ -70,6 +70,44 @@ def create_learning_session(
     )
 
 
+@router.post("/{session_id}/resume", response_model=LearningSessionCreateResponse)
+def resume_learning_session(session_id: int, db: Session = Depends(get_db)) -> LearningSessionCreateResponse:
+    session_repository = LearningSessionRepository(db)
+    task_repository = AsyncTaskRepository(db)
+
+    learning_session = session_repository.get(session_id)
+    if learning_session is None:
+        raise HTTPException(status_code=404, detail=f"learning_session not found: {session_id}")
+
+    task_id = str(uuid4())
+    task_repository.create(
+        task_id=task_id,
+        session_id=session_id,
+        task_type="generate_learning_session",
+        status="pending",
+        progress=0,
+        message="resume queued",
+    )
+
+    try:
+        generate_learning_session_task.apply_async(args=[session_id], task_id=task_id)
+    except Exception as exc:
+        task_repository.update(
+            task_id=task_id,
+            status="failed",
+            progress=0,
+            message="failed_to_enqueue",
+            error_message=str(exc),
+        )
+        raise HTTPException(status_code=503, detail=f"Failed to enqueue resume task: {exc}") from exc
+
+    return LearningSessionCreateResponse(
+        session_id=session_id,
+        task_id=task_id,
+        status="generating",
+    )
+
+
 @router.get("/{session_id}", response_model=LearningSessionRead)
 def get_learning_session(session_id: int, db: Session = Depends(get_db)) -> LearningSessionRead:
     session_repository = LearningSessionRepository(db)

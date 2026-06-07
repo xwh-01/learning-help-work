@@ -26,3 +26,10 @@ sources:
       - prometheus
       - Prometheus
     source_url: https://prometheus.io/docs/introduction/overview/
+
+  fastapi:
+    tech_name: FastAPI
+    aliases:
+      - fastapi
+      - FastAPI
+    source_url: https://fastapi.tiangolo.com/

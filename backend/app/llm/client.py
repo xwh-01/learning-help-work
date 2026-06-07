@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from typing import Any, TypeVar
@@ -81,6 +82,8 @@ class LLMClient:
                     self.max_retries + 1,
                     detail,
                 )
+                if attempt < self.max_retries:
+                    await asyncio.sleep(1)
 
         logger.error("LLM chat completion failed after retries: %s", last_error)
         raise LLMError(f"LLM chat completion failed after {self.max_retries + 1} attempts: {last_error}") from last_error
@@ -128,6 +131,8 @@ class LLMClient:
                     preview,
                     exc,
                 )
+                if attempt < self.max_retries:
+                    await asyncio.sleep(1)
 
         logger.error("LLM JSON failed validation after retries for %s.", schema.__name__)
         preview = content[:500] if 'content' in dir() else "(no content)"

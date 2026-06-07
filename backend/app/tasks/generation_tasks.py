@@ -126,6 +126,11 @@ async def _generate_learning_session(db: Session, *, session_id: int, task_id: s
         session_id, knowledge_point_id=first_point_id, level_id=first_level_id,
     )
 
+    if must_learn_points and len(examples) < len(must_learn_points):
+        errors.append({"step": "generate_examples", "error": f"Only {len(examples)}/{len(must_learn_points)} examples generated"})
+    if must_learn_points and len(levels) < len(must_learn_points) * 3:
+        errors.append({"step": "generate_levels", "error": f"Only {len(levels)}/{len(must_learn_points) * 3} levels generated"})
+
     all_ok = len(errors) == 0 and len(must_learn_points) > 0
     final_status = "ready" if all_ok else "partial"
     session_repository.set_status(session_id, final_status)
